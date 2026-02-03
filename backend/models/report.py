@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 
 @dataclass
@@ -131,6 +131,75 @@ class MapPoolEntry:
 
 
 @dataclass
+class PlayerBehaviorProfile:
+    """Detailed behavior profile for a player."""
+    name: str
+    primary_role: str  # "Duelist", "Controller", "Sentinel", "Initiator"
+    secondary_role: str = ""
+    aggression_score: float = 50.0  # 0-100, higher = more aggressive
+    consistency_score: float = 50.0  # 0-100, higher = more consistent
+    impact_rating: float = 50.0  # 0-100, overall impact
+    playstyle_tags: List[str] = field(default_factory=list)  # ["Entry Fragger", "Lurker", "Anchor", etc.]
+    agent_pool: List[str] = field(default_factory=list)
+    preferred_site: str = ""  # "A", "B", "C", "Flex" - inferred from agent
+    round_presence: str = ""  # "Early", "Mid", "Late" - when they tend to have impact
+
+    def to_dict(self) -> dict:
+        return {
+            'name': self.name,
+            'primary_role': self.primary_role,
+            'secondary_role': self.secondary_role,
+            'aggression_score': round(self.aggression_score, 1),
+            'consistency_score': round(self.consistency_score, 1),
+            'impact_rating': round(self.impact_rating, 1),
+            'playstyle_tags': self.playstyle_tags,
+            'agent_pool': self.agent_pool,
+            'preferred_site': self.preferred_site,
+            'round_presence': self.round_presence
+        }
+
+
+@dataclass
+class TeamComposition:
+    """Team composition analysis."""
+    primary_comp: List[str]  # Most used agent comp
+    comp_frequency: float  # How often they run this comp (0-1)
+    role_distribution: dict  # {"Duelist": 1.2, "Controller": 1.0, ...} - avg per game
+    flex_players: List[str]  # Players who switch roles often
+    one_tricks: List[str]  # Players who rarely switch agents
+    aggression_style: str  # "Aggressive", "Balanced", "Passive"
+    execute_style: str  # "Fast", "Default", "Slow" - inferred from agent picks
+
+    def to_dict(self) -> dict:
+        return {
+            'primary_comp': self.primary_comp,
+            'comp_frequency': round(self.comp_frequency * 100, 1),
+            'role_distribution': {k: round(v, 2) for k, v in self.role_distribution.items()},
+            'flex_players': self.flex_players,
+            'one_tricks': self.one_tricks,
+            'aggression_style': self.aggression_style,
+            'execute_style': self.execute_style
+        }
+
+
+@dataclass
+class EconomyTendency:
+    """Economy and buy round tendencies."""
+    force_buy_frequency: str  # "Often", "Sometimes", "Rarely"
+    eco_discipline: str  # "Disciplined", "Mixed", "Chaotic"
+    save_round_effectiveness: str  # "Strong", "Average", "Weak"
+    post_plant_focus: str  # "High", "Medium", "Low" - inferred from sentinel picks
+
+    def to_dict(self) -> dict:
+        return {
+            'force_buy_frequency': self.force_buy_frequency,
+            'eco_discipline': self.eco_discipline,
+            'save_round_effectiveness': self.save_round_effectiveness,
+            'post_plant_focus': self.post_plant_focus
+        }
+
+
+@dataclass
 class ScoutReport:
     """The complete scouting report."""
     team_id: str
@@ -145,6 +214,10 @@ class ScoutReport:
     veto_recommendations: List[VetoRecommendation] = field(default_factory=list)
     tactical_insights: List[TacticalInsight] = field(default_factory=list)
     map_pool_matrix: List[MapPoolEntry] = field(default_factory=list)
+    # Player behavior analytics
+    player_behavior_profiles: List[PlayerBehaviorProfile] = field(default_factory=list)
+    team_composition: Optional[TeamComposition] = None
+    economy_tendency: Optional[EconomyTendency] = None
 
     def to_dict(self) -> dict:
         return {
@@ -158,5 +231,8 @@ class ScoutReport:
             'date_range': self.date_range,
             'veto_recommendations': [v.to_dict() for v in self.veto_recommendations],
             'tactical_insights': [t.to_dict() for t in self.tactical_insights],
-            'map_pool_matrix': [m.to_dict() for m in self.map_pool_matrix]
+            'map_pool_matrix': [m.to_dict() for m in self.map_pool_matrix],
+            'player_behavior_profiles': [p.to_dict() for p in self.player_behavior_profiles],
+            'team_composition': self.team_composition.to_dict() if self.team_composition else None,
+            'economy_tendency': self.economy_tendency.to_dict() if self.economy_tendency else None
         }

@@ -3,6 +3,55 @@ import axios from 'axios';
 
 const API_BASE = 'http://localhost:5001';
 
+// Map image paths - add your map images to /public/maps/{mapname}.png or .jpg
+const MAP_IMAGES: { [key: string]: string } = {
+  'Abyss': '/maps/abyss.png',
+  'Ascent': '/maps/ascent.png',
+  'Bind': '/maps/bind.png',
+  'Breeze': '/maps/breeze.png',
+  'Haven': '/maps/haven.png',
+  'Icebox': '/maps/icebox.png',
+  'Lotus': '/maps/lotus.png',
+  'Pearl': '/maps/pearl.png',
+  'Split': '/maps/split.png',
+  'Sunset': '/maps/sunset.png',
+};
+
+// Helper to get map image with fallback
+const getMapImage = (mapName: string): string | null => {
+  const normalized = mapName.charAt(0).toUpperCase() + mapName.slice(1).toLowerCase();
+  return MAP_IMAGES[normalized] || MAP_IMAGES[mapName] || null;
+};
+
+// Map image component with fallback
+const MapThumbnail = ({ mapName, size = 'sm' }: { mapName: string; size?: 'sm' | 'md' | 'lg' }) => {
+  const [imgError, setImgError] = useState(false);
+  const imagePath = getMapImage(mapName);
+
+  const sizeClasses = {
+    sm: 'w-8 h-8',
+    md: 'w-12 h-12',
+    lg: 'w-16 h-16'
+  };
+
+  if (!imagePath || imgError) {
+    return (
+      <div className={`${sizeClasses[size]} rounded bg-gradient-to-br from-gray-600 to-gray-700 flex items-center justify-center text-xs font-bold text-gray-400`}>
+        {mapName.slice(0, 2).toUpperCase()}
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={imagePath}
+      alt={mapName}
+      className={`${sizeClasses[size]} rounded object-cover`}
+      onError={() => setImgError(true)}
+    />
+  );
+};
+
 interface Team {
   id: string;
   name: string;
@@ -55,6 +104,36 @@ interface MapPoolEntry {
   avg_round_diff: number;
 }
 
+interface PlayerBehaviorProfile {
+  name: string;
+  primary_role: string;
+  secondary_role: string;
+  aggression_score: number;
+  consistency_score: number;
+  impact_rating: number;
+  playstyle_tags: string[];
+  agent_pool: string[];
+  preferred_site: string;
+  round_presence: string;
+}
+
+interface TeamComposition {
+  primary_comp: string[];
+  comp_frequency: number;
+  role_distribution: { [key: string]: number };
+  flex_players: string[];
+  one_tricks: string[];
+  aggression_style: string;
+  execute_style: string;
+}
+
+interface EconomyTendency {
+  force_buy_frequency: string;
+  eco_discipline: string;
+  save_round_effectiveness: string;
+  post_plant_focus: string;
+}
+
 interface ScoutReport {
   team_id: string;
   team_name: string;
@@ -72,6 +151,9 @@ interface ScoutReport {
   veto_recommendations: VetoRecommendation[];
   tactical_insights: TacticalInsight[];
   map_pool_matrix: MapPoolEntry[];
+  player_behavior_profiles: PlayerBehaviorProfile[];
+  team_composition: TeamComposition | null;
+  economy_tendency: EconomyTendency | null;
 }
 
 interface MapAdvantage {
@@ -117,7 +199,8 @@ const VetoEngine = ({ recommendations, coachMode }: { recommendations: VetoRecom
               key={rec.map_name}
               className={`flex items-center justify-between p-3 rounded-lg ${style.bg} transition-all`}
             >
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3">
+                <MapThumbnail mapName={rec.map_name} size="sm" />
                 <span className={`font-bold text-lg ${style.text}`}>{rec.map_name}</span>
                 <span className={`text-xs px-2 py-1 rounded ${coachMode ? 'bg-black/10' : 'bg-black/30'} ${style.text}`}>
                   {style.label}
@@ -226,7 +309,12 @@ const MapPoolMatrix = ({ matrix, coachMode }: { matrix: MapPoolEntry[], coachMod
           <tbody>
             {mapsWithData.map((map) => (
               <tr key={map.map_name} className={coachMode ? 'border-b border-gray-200' : 'border-b border-gray-700'}>
-                <td className="py-2 px-3 font-semibold">{map.map_name}</td>
+                <td className="py-2 px-3">
+                  <div className="flex items-center gap-2">
+                    <MapThumbnail mapName={map.map_name} size="sm" />
+                    <span className="font-semibold">{map.map_name}</span>
+                  </div>
+                </td>
                 <td className="text-center py-2 px-3">{map.games_played}</td>
                 <td className="text-center py-2 px-3">
                   <span className={`px-2 py-1 rounded font-bold ${getColorClass(map.win_rate)}`}>
@@ -252,6 +340,283 @@ const MapPoolMatrix = ({ matrix, coachMode }: { matrix: MapPoolEntry[], coachMod
             ))}
           </tbody>
         </table>
+      </div>
+    </section>
+  );
+};
+
+// Player Behavior Profiles Component - Shows aggression, roles, playstyle
+const PlayerBehaviorSection = ({ profiles, coachMode }: { profiles: PlayerBehaviorProfile[], coachMode: boolean }) => {
+  if (!profiles || profiles.length === 0) return null;
+
+  const getRoleColor = (role: string) => {
+    switch (role) {
+      case 'Duelist': return 'bg-red-500 text-white';
+      case 'Controller': return 'bg-purple-500 text-white';
+      case 'Sentinel': return 'bg-green-500 text-white';
+      case 'Initiator': return 'bg-blue-500 text-white';
+      default: return 'bg-gray-500 text-white';
+    }
+  };
+
+  const getAggressionColor = (score: number) => {
+    if (score >= 70) return 'bg-red-500';
+    if (score >= 50) return 'bg-yellow-500';
+    return 'bg-blue-500';
+  };
+
+  const getAggressionLabel = (score: number) => {
+    if (score >= 80) return 'Very Aggressive';
+    if (score >= 60) return 'Aggressive';
+    if (score >= 40) return 'Balanced';
+    if (score >= 20) return 'Passive';
+    return 'Very Passive';
+  };
+
+  return (
+    <section className={`p-6 rounded-lg ${coachMode ? 'border-2 border-black' : 'bg-gray-800'}`}>
+      <h3 className="text-2xl font-bold mb-2 text-c9-blue">Player Behavior Profiles</h3>
+      <p className={`text-sm mb-4 ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>
+        Individual playstyles, aggression levels, and tendencies
+      </p>
+      <div className="space-y-4">
+        {profiles.map((profile) => (
+          <div key={profile.name} className={`p-4 rounded-lg ${coachMode ? 'bg-gray-100' : 'bg-gray-700/50'}`}>
+            {/* Header: Name, Role, Impact */}
+            <div className="flex flex-wrap justify-between items-center gap-2 mb-3">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-lg">{profile.name}</span>
+                <span className={`px-2 py-0.5 rounded text-xs font-bold ${getRoleColor(profile.primary_role)}`}>
+                  {profile.primary_role}
+                </span>
+                {profile.secondary_role && (
+                  <span className={`px-2 py-0.5 rounded text-xs ${coachMode ? 'bg-gray-300' : 'bg-gray-600'}`}>
+                    {profile.secondary_role}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`text-xs ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>
+                  Impact: {profile.impact_rating.toFixed(0)}
+                </span>
+                <span className={`text-xs px-2 py-0.5 rounded ${coachMode ? 'bg-gray-200' : 'bg-gray-600'}`}>
+                  {profile.preferred_site} Site
+                </span>
+              </div>
+            </div>
+
+            {/* Aggression Bar */}
+            <div className="mb-3">
+              <div className="flex justify-between items-center mb-1">
+                <span className={`text-xs ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>Aggression</span>
+                <span className={`text-xs font-semibold ${
+                  profile.aggression_score >= 60 ? 'text-red-400' :
+                  profile.aggression_score >= 40 ? 'text-yellow-400' : 'text-blue-400'
+                }`}>
+                  {getAggressionLabel(profile.aggression_score)}
+                </span>
+              </div>
+              <div className={`h-2 rounded-full ${coachMode ? 'bg-gray-300' : 'bg-gray-600'}`}>
+                <div
+                  className={`h-2 rounded-full ${getAggressionColor(profile.aggression_score)} transition-all`}
+                  style={{ width: `${profile.aggression_score}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Round Presence */}
+            <div className="flex items-center gap-2 mb-3">
+              <span className={`text-xs ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>Impact Timing:</span>
+              <span className={`text-xs px-2 py-0.5 rounded font-semibold ${
+                profile.round_presence === 'Early' ? 'bg-red-500/30 text-red-300' :
+                profile.round_presence === 'Late' ? 'bg-blue-500/30 text-blue-300' :
+                'bg-yellow-500/30 text-yellow-300'
+              }`}>
+                {profile.round_presence} Round
+              </span>
+            </div>
+
+            {/* Playstyle Tags */}
+            <div className="flex flex-wrap gap-1 mb-2">
+              {profile.playstyle_tags.map((tag) => (
+                <span
+                  key={tag}
+                  className={`px-2 py-0.5 rounded text-xs ${
+                    tag.includes('Entry') || tag.includes('Aggressive') ? 'bg-red-500/20 text-red-300' :
+                    tag.includes('Lurk') || tag.includes('Flank') ? 'bg-purple-500/20 text-purple-300' :
+                    tag.includes('Anchor') || tag.includes('Support') ? 'bg-green-500/20 text-green-300' :
+                    tag.includes('Clutch') ? 'bg-yellow-500/20 text-yellow-300' :
+                    coachMode ? 'bg-gray-200 text-gray-700' : 'bg-gray-600 text-gray-300'
+                  }`}
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+
+            {/* Agent Pool */}
+            <div className="flex items-center gap-2">
+              <span className={`text-xs ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>Agents:</span>
+              <div className="flex gap-1">
+                {profile.agent_pool.map((agent) => (
+                  <span key={agent} className={`px-2 py-0.5 rounded text-xs font-medium ${coachMode ? 'bg-gray-200' : 'bg-gray-600'}`}>
+                    {agent}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+};
+
+// Team Composition Analysis Component
+const TeamCompositionSection = ({ composition, coachMode }: { composition: TeamComposition | null, coachMode: boolean }) => {
+  if (!composition) return null;
+
+  const getStyleColor = (style: string) => {
+    if (style === 'Aggressive' || style === 'Fast') return 'text-red-400';
+    if (style === 'Passive' || style === 'Slow') return 'text-blue-400';
+    return 'text-yellow-400';
+  };
+
+  return (
+    <section className={`p-6 rounded-lg ${coachMode ? 'border-2 border-black' : 'bg-gray-800'}`}>
+      <h3 className="text-2xl font-bold mb-2 text-c9-blue">Team Composition Analysis</h3>
+      <p className={`text-sm mb-4 ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>
+        How they build their team and execute rounds
+      </p>
+
+      <div className="grid md:grid-cols-2 gap-4">
+        {/* Primary Comp */}
+        <div className={`p-4 rounded-lg ${coachMode ? 'bg-gray-100' : 'bg-gray-700/50'}`}>
+          <h4 className="font-semibold mb-2">Primary Composition</h4>
+          <div className="flex flex-wrap gap-1 mb-2">
+            {composition.primary_comp.map((agent) => (
+              <span key={agent} className={`px-2 py-1 rounded text-sm font-medium ${coachMode ? 'bg-gray-200' : 'bg-gray-600'}`}>
+                {agent}
+              </span>
+            ))}
+          </div>
+          <p className={`text-xs ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>
+            Used in ~{composition.comp_frequency}% of games
+          </p>
+        </div>
+
+        {/* Playstyle */}
+        <div className={`p-4 rounded-lg ${coachMode ? 'bg-gray-100' : 'bg-gray-700/50'}`}>
+          <h4 className="font-semibold mb-2">Playstyle</h4>
+          <div className="space-y-2">
+            <div className="flex justify-between">
+              <span className={`text-sm ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>Aggression:</span>
+              <span className={`text-sm font-bold ${getStyleColor(composition.aggression_style)}`}>
+                {composition.aggression_style}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className={`text-sm ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>Execute Speed:</span>
+              <span className={`text-sm font-bold ${getStyleColor(composition.execute_style)}`}>
+                {composition.execute_style}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Role Distribution */}
+        <div className={`p-4 rounded-lg ${coachMode ? 'bg-gray-100' : 'bg-gray-700/50'}`}>
+          <h4 className="font-semibold mb-2">Role Distribution</h4>
+          <div className="space-y-1">
+            {Object.entries(composition.role_distribution).map(([role, count]) => (
+              <div key={role} className="flex justify-between items-center">
+                <span className={`text-sm ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>{role}</span>
+                <div className="flex items-center gap-2">
+                  <div className={`w-16 h-2 rounded-full ${coachMode ? 'bg-gray-300' : 'bg-gray-600'}`}>
+                    <div
+                      className={`h-2 rounded-full ${
+                        role === 'Duelist' ? 'bg-red-500' :
+                        role === 'Controller' ? 'bg-purple-500' :
+                        role === 'Sentinel' ? 'bg-green-500' : 'bg-blue-500'
+                      }`}
+                      style={{ width: `${Math.min(count / 2 * 100, 100)}%` }}
+                    />
+                  </div>
+                  <span className="text-sm font-mono">{count.toFixed(1)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Flex Players & One-Tricks */}
+        <div className={`p-4 rounded-lg ${coachMode ? 'bg-gray-100' : 'bg-gray-700/50'}`}>
+          <h4 className="font-semibold mb-2">Player Flexibility</h4>
+          {composition.flex_players.length > 0 && (
+            <div className="mb-2">
+              <span className={`text-xs ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>Flex Players: </span>
+              <span className="text-sm text-green-400">{composition.flex_players.join(', ')}</span>
+            </div>
+          )}
+          {composition.one_tricks.length > 0 && (
+            <div>
+              <span className={`text-xs ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>Specialists: </span>
+              <span className="text-sm text-yellow-400">{composition.one_tricks.join(', ')}</span>
+            </div>
+          )}
+          {composition.flex_players.length === 0 && composition.one_tricks.length === 0 && (
+            <span className={`text-sm ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>Balanced flexibility</span>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+};
+
+// Economy Tendency Component
+const EconomyTendencySection = ({ economy, coachMode }: { economy: EconomyTendency | null, coachMode: boolean }) => {
+  if (!economy) return null;
+
+  const getTendencyColor = (value: string) => {
+    const positives = ['Strong', 'Disciplined', 'Rarely', 'High'];
+    const negatives = ['Weak', 'Chaotic', 'Often', 'Low'];
+    if (positives.includes(value)) return 'text-green-400';
+    if (negatives.includes(value)) return 'text-red-400';
+    return 'text-yellow-400';
+  };
+
+  return (
+    <section className={`p-6 rounded-lg ${coachMode ? 'border-2 border-black' : 'bg-gray-800'}`}>
+      <h3 className="text-2xl font-bold mb-2 text-c9-blue">Economy Tendencies</h3>
+      <p className={`text-sm mb-4 ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>
+        Buy patterns and economic discipline (inferred from match data)
+      </p>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className={`p-3 rounded-lg text-center ${coachMode ? 'bg-gray-100' : 'bg-gray-700/50'}`}>
+          <p className={`text-xs mb-1 ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>Force Buys</p>
+          <p className={`font-bold ${getTendencyColor(economy.force_buy_frequency)}`}>
+            {economy.force_buy_frequency}
+          </p>
+        </div>
+        <div className={`p-3 rounded-lg text-center ${coachMode ? 'bg-gray-100' : 'bg-gray-700/50'}`}>
+          <p className={`text-xs mb-1 ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>Eco Discipline</p>
+          <p className={`font-bold ${getTendencyColor(economy.eco_discipline)}`}>
+            {economy.eco_discipline}
+          </p>
+        </div>
+        <div className={`p-3 rounded-lg text-center ${coachMode ? 'bg-gray-100' : 'bg-gray-700/50'}`}>
+          <p className={`text-xs mb-1 ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>Save Rounds</p>
+          <p className={`font-bold ${getTendencyColor(economy.save_round_effectiveness)}`}>
+            {economy.save_round_effectiveness}
+          </p>
+        </div>
+        <div className={`p-3 rounded-lg text-center ${coachMode ? 'bg-gray-100' : 'bg-gray-700/50'}`}>
+          <p className={`text-xs mb-1 ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>Post-Plant Focus</p>
+          <p className={`font-bold ${getTendencyColor(economy.post_plant_focus)}`}>
+            {economy.post_plant_focus}
+          </p>
+        </div>
       </div>
     </section>
   );
@@ -402,7 +767,8 @@ const MapAdvantagesSection = ({ advantages, yourTeamName, opponentName, coachMod
               'bg-yellow-600/30'
             }`}
           >
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
+              <MapThumbnail mapName={adv.map} size="sm" />
               <span className="font-bold text-lg">{adv.map}</span>
               <span className={`text-xs px-2 py-1 rounded ${
                 adv.advantage === 'yours' ? 'bg-green-600 text-white' :
@@ -577,7 +943,7 @@ function App() {
       <div className="max-w-5xl mx-auto">
         <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold text-c9-blue">C9 Scout</h1>
+            <h1 className="text-3xl md:text-4xl font-bold text-c9-blue">VetoBrain</h1>
             <p className={`text-sm ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>
               VALORANT Automated Scouting Reports
             </p>
@@ -721,16 +1087,26 @@ function App() {
               coachMode={coachMode}
             />
 
-            {/* Opponent Analysis Section */}
-            <div className={`p-4 rounded-lg ${coachMode ? 'bg-blue-50 border-2 border-blue-200' : 'bg-blue-900/20'}`}>
-              <h2 className="text-xl font-bold mb-4 text-c9-blue">Opponent Analysis: {comparisonReport.opponent.team_name}</h2>
-            </div>
-
             {/* Veto Engine for opponent */}
             <VetoEngine recommendations={comparisonReport.opponent.veto_recommendations} coachMode={coachMode} />
 
             {/* Tactical Insights for opponent */}
             <TacticalInsights insights={comparisonReport.opponent.tactical_insights} coachMode={coachMode} />
+
+            {/* NEW: Opponent Player Behavior Profiles */}
+            {comparisonReport.opponent.player_behavior_profiles && comparisonReport.opponent.player_behavior_profiles.length > 0 && (
+              <PlayerBehaviorSection profiles={comparisonReport.opponent.player_behavior_profiles} coachMode={coachMode} />
+            )}
+
+            {/* NEW: Opponent Team Composition */}
+            {comparisonReport.opponent.team_composition && (
+              <TeamCompositionSection composition={comparisonReport.opponent.team_composition} coachMode={coachMode} />
+            )}
+
+            {/* NEW: Opponent Economy Tendencies */}
+            {comparisonReport.opponent.economy_tendency && (
+              <EconomyTendencySection economy={comparisonReport.opponent.economy_tendency} coachMode={coachMode} />
+            )}
 
             {/* Opponent Map Pool */}
             <MapPoolMatrix matrix={comparisonReport.opponent.map_pool_matrix} coachMode={coachMode} />
@@ -792,6 +1168,21 @@ function App() {
             {/* HERO FEATURE 2: Tactical Insights */}
             <TacticalInsights insights={report.tactical_insights} coachMode={coachMode} />
 
+            {/* NEW: Player Behavior Profiles */}
+            {report.player_behavior_profiles && report.player_behavior_profiles.length > 0 && (
+              <PlayerBehaviorSection profiles={report.player_behavior_profiles} coachMode={coachMode} />
+            )}
+
+            {/* NEW: Team Composition Analysis */}
+            {report.team_composition && (
+              <TeamCompositionSection composition={report.team_composition} coachMode={coachMode} />
+            )}
+
+            {/* NEW: Economy Tendencies */}
+            {report.economy_tendency && (
+              <EconomyTendencySection economy={report.economy_tendency} coachMode={coachMode} />
+            )}
+
             {/* HERO FEATURE 3: Map Pool Matrix */}
             <MapPoolMatrix matrix={report.map_pool_matrix} coachMode={coachMode} />
 
@@ -820,7 +1211,7 @@ function App() {
 
         {/* Footer */}
         <footer className={`mt-12 pt-6 border-t text-center text-sm ${coachMode ? 'border-gray-200 text-gray-500' : 'border-gray-700 text-gray-500'}`}>
-          <p>Built for Cloud9 x JetBrains Hackathon 2025</p>
+          <p>VALORANT Scouting Intelligence</p>
         </footer>
       </div>
 

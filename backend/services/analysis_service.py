@@ -6,7 +6,8 @@ from datetime import datetime
 from models.match import Match, PlayerMatchStats
 from models.report import (
     ScoutReport, PlayerStats, ReportSummary, MapStats,
-    VetoRecommendation, TacticalInsight, MapPoolEntry
+    VetoRecommendation, TacticalInsight, MapPoolEntry,
+    PlayerBehaviorProfile, TeamComposition, EconomyTendency
 )
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,67 @@ class AnalysisService:
 
     # All VALORANT maps in the current pool
     ALL_MAPS = ["Abyss", "Ascent", "Bind", "Breeze", "Haven", "Icebox", "Lotus", "Pearl", "Split", "Sunset"]
+
+    # Agent role classifications
+    AGENT_ROLES = {
+        # Duelists - Entry fraggers, aggressive playmakers
+        'Jett': 'Duelist', 'Raze': 'Duelist', 'Reyna': 'Duelist',
+        'Phoenix': 'Duelist', 'Yoru': 'Duelist', 'Neon': 'Duelist', 'Iso': 'Duelist',
+        # Controllers - Smoke/vision control
+        'Omen': 'Controller', 'Brimstone': 'Controller', 'Viper': 'Controller',
+        'Astra': 'Controller', 'Harbor': 'Controller', 'Clove': 'Controller',
+        # Sentinels - Anchors, site holders
+        'Killjoy': 'Sentinel', 'Cypher': 'Sentinel', 'Sage': 'Sentinel',
+        'Chamber': 'Sentinel', 'Deadlock': 'Sentinel', 'Vyse': 'Sentinel',
+        # Initiators - Info gatherers, entry support
+        'Sova': 'Initiator', 'Breach': 'Initiator', 'Skye': 'Initiator',
+        'KAY/O': 'Initiator', 'Fade': 'Initiator', 'Gekko': 'Initiator'
+    }
+
+    # Playstyle inference based on agent
+    AGENT_PLAYSTYLES = {
+        # Aggressive entry
+        'Jett': ['Entry Fragger', 'Op Player', 'Space Creator'],
+        'Raze': ['Entry Fragger', 'Site Clearer', 'Utility Damage'],
+        'Reyna': ['Entry Fragger', 'Self-Sufficient', 'Clutch Player'],
+        'Neon': ['Entry Fragger', 'Fast Executes', 'Space Creator'],
+        'Phoenix': ['Entry Fragger', 'Self-Sufficient', 'Flash Player'],
+        # Lurk/Flank
+        'Yoru': ['Lurker', 'Flanker', 'Mind Games'],
+        'Omen': ['Lurker', 'Flanker', 'Creative Plays'],
+        'Cypher': ['Lurker', 'Info Gatherer', 'Flank Watch'],
+        # Anchor/Site hold
+        'Killjoy': ['Anchor', 'Site Holder', 'Post-Plant'],
+        'Sage': ['Anchor', 'Support', 'Healer'],
+        'Deadlock': ['Anchor', 'Site Holder', 'Trap Player'],
+        'Vyse': ['Anchor', 'Site Holder', 'Area Denial'],
+        # Support
+        'Sova': ['Support', 'Info Gatherer', 'Post-Plant'],
+        'Fade': ['Support', 'Info Gatherer', 'Entry Support'],
+        'Skye': ['Support', 'Entry Support', 'Healer'],
+        'Breach': ['Support', 'Entry Support', 'Flash Player'],
+        'KAY/O': ['Support', 'Entry Support', 'Suppression'],
+        'Gekko': ['Support', 'Entry Support', 'Utility Recycle'],
+        # Flex
+        'Chamber': ['Op Player', 'Anchor', 'Clutch Player'],
+        'Iso': ['Entry Fragger', 'Duelist', '1v1 Specialist'],
+        'Viper': ['Anchor', 'Post-Plant', 'Site Controller'],
+        'Brimstone': ['Support', 'Post-Plant', 'Execute Caller'],
+        'Astra': ['Support', 'Global Control', 'Big Brain'],
+        'Harbor': ['Support', 'Site Controller', 'Fast Executes'],
+        'Clove': ['Support', 'Self-Sufficient', 'Aggro Smoke']
+    }
+
+    # Site preference inference
+    AGENT_SITE_PREFERENCE = {
+        # A site preferences (typically have long angles, op spots)
+        'Jett': 'Flex', 'Chamber': 'A', 'Sova': 'A',
+        # B site preferences (typically tighter, more utility-focused)
+        'Killjoy': 'B', 'Cypher': 'B', 'Raze': 'B',
+        # Flex/Mid
+        'Omen': 'Mid', 'Viper': 'Flex', 'Sage': 'Flex',
+        # Default flex for others
+    }
 
     def get_team_map_stats(self, matches: List[Match]) -> Dict:
         """
@@ -94,6 +156,15 @@ class AnalysisService:
         # NEW: Generate map pool matrix
         map_pool_matrix = self._generate_map_pool_matrix(map_stats)
 
+        # NEW: Generate player behavior profiles
+        player_behavior_profiles = self._generate_player_behavior_profiles(player_aggregates)
+
+        # NEW: Generate team composition analysis
+        team_composition = self._generate_team_composition(player_aggregates, matches)
+
+        # NEW: Generate economy tendencies
+        economy_tendency = self._generate_economy_tendency(matches, player_aggregates)
+
         summary = ReportSummary(
             primary_threat=primary_threat,
             key_takeaway=key_takeaway,
@@ -112,7 +183,10 @@ class AnalysisService:
             date_range=date_range,
             veto_recommendations=veto_recommendations,
             tactical_insights=tactical_insights,
-            map_pool_matrix=map_pool_matrix
+            map_pool_matrix=map_pool_matrix,
+            player_behavior_profiles=player_behavior_profiles,
+            team_composition=team_composition,
+            economy_tendency=economy_tendency
         )
 
     def _generate_veto_recommendations(
@@ -437,6 +511,94 @@ class AnalysisService:
         )
         map_pool_matrix = self._generate_map_pool_matrix(map_stats)
 
+        # Demo player behavior profiles
+        player_behavior_profiles = [
+            PlayerBehaviorProfile(
+                name="aspas",
+                primary_role="Duelist",
+                secondary_role="",
+                aggression_score=92.5,
+                consistency_score=88.0,
+                impact_rating=95.0,
+                playstyle_tags=["Entry Fragger", "Op Player", "Aggressive Opener", "High Fragging"],
+                agent_pool=["Jett", "Raze", "Reyna"],
+                preferred_site="Flex",
+                round_presence="Early"
+            ),
+            PlayerBehaviorProfile(
+                name="Less",
+                primary_role="Initiator",
+                secondary_role="Sentinel",
+                aggression_score=65.0,
+                consistency_score=82.0,
+                impact_rating=78.0,
+                playstyle_tags=["Support", "Info Gatherer", "Entry Support"],
+                agent_pool=["Sova", "Fade", "KAY/O"],
+                preferred_site="A",
+                round_presence="Early-Mid"
+            ),
+            PlayerBehaviorProfile(
+                name="cauanzin",
+                primary_role="Controller",
+                secondary_role="",
+                aggression_score=45.0,
+                consistency_score=75.0,
+                impact_rating=68.0,
+                playstyle_tags=["Lurker", "Creative Plays", "Mid-Round"],
+                agent_pool=["Omen", "Astra", "Viper"],
+                preferred_site="Mid",
+                round_presence="Mid-Late"
+            ),
+            PlayerBehaviorProfile(
+                name="tuyz",
+                primary_role="Sentinel",
+                secondary_role="",
+                aggression_score=32.0,
+                consistency_score=80.0,
+                impact_rating=62.0,
+                playstyle_tags=["Anchor", "Site Holder", "Post-Plant", "Clutch Potential"],
+                agent_pool=["Killjoy", "Cypher", "Chamber"],
+                preferred_site="B",
+                round_presence="Late"
+            ),
+            PlayerBehaviorProfile(
+                name="raafa",
+                primary_role="Initiator",
+                secondary_role="",
+                aggression_score=55.0,
+                consistency_score=70.0,
+                impact_rating=58.0,
+                playstyle_tags=["Support", "Entry Support", "Flash Player"],
+                agent_pool=["Breach", "Skye", "Gekko"],
+                preferred_site="Flex",
+                round_presence="Early-Mid"
+            ),
+        ]
+
+        # Demo team composition
+        team_composition = TeamComposition(
+            primary_comp=["Jett", "Sova", "Omen", "Killjoy", "Breach"],
+            comp_frequency=0.65,
+            role_distribution={
+                "Duelist": 1.2,
+                "Initiator": 1.8,
+                "Controller": 1.0,
+                "Sentinel": 1.0
+            },
+            flex_players=["Less", "raafa"],
+            one_tricks=["aspas"],
+            aggression_style="Aggressive",
+            execute_style="Fast"
+        )
+
+        # Demo economy tendency
+        economy_tendency = EconomyTendency(
+            force_buy_frequency="Sometimes",
+            eco_discipline="Disciplined",
+            save_round_effectiveness="Strong",
+            post_plant_focus="Medium"
+        )
+
         summary = ReportSummary(
             primary_threat="aspas (Jett)",
             key_takeaway=f"{team_name} plays an aggressive duelist-focused style centered around aspas. Ban their best map and aim for their weak ones.",
@@ -455,7 +617,10 @@ class AnalysisService:
             date_range="Jan 15 - Feb 1, 2025",
             veto_recommendations=veto_recommendations,
             tactical_insights=tactical_insights,
-            map_pool_matrix=map_pool_matrix
+            map_pool_matrix=map_pool_matrix,
+            player_behavior_profiles=player_behavior_profiles,
+            team_composition=team_composition,
+            economy_tendency=economy_tendency
         )
 
     # ==================== EXISTING METHODS ====================
@@ -659,3 +824,350 @@ class AnalysisService:
     def _empty_report(self, team_id: str, team_name: str) -> ScoutReport:
         """Generate empty report - now redirects to demo report."""
         return self._generate_demo_report(team_id, team_name)
+
+    # ==================== PLAYER BEHAVIOR ANALYSIS ====================
+
+    def _generate_player_behavior_profiles(
+        self,
+        player_aggregates: Dict
+    ) -> List[PlayerBehaviorProfile]:
+        """
+        Generate detailed behavior profiles for each player based on their
+        agent picks, performance stats, and playstyle indicators.
+        """
+        profiles = []
+
+        for pid, data in player_aggregates.items():
+            if data['games'] == 0:
+                continue
+
+            name = data['name']
+            agents = data['agents']
+            agent_wins = data.get('agent_wins', {})
+
+            # Determine primary and secondary roles
+            role_counts = defaultdict(int)
+            for agent, count in agents.items():
+                role = self.AGENT_ROLES.get(agent, 'Unknown')
+                role_counts[role] += count
+
+            sorted_roles = sorted(role_counts.items(), key=lambda x: x[1], reverse=True)
+            primary_role = sorted_roles[0][0] if sorted_roles else 'Unknown'
+            secondary_role = sorted_roles[1][0] if len(sorted_roles) > 1 else ''
+
+            # Calculate aggression score (0-100)
+            # Based on: first blood rate, K/D ratio, and duelist picks
+            avg_kd = data['total_kills'] / max(data['total_deaths'], 1)
+            fb_rate = data['total_first_bloods'] / max(
+                data['total_first_bloods'] + data['total_first_deaths'], 1
+            )
+
+            # Duelist ratio affects aggression
+            total_picks = sum(agents.values())
+            duelist_ratio = role_counts.get('Duelist', 0) / max(total_picks, 1)
+
+            # Aggression formula: FB rate (40%) + K/D normalized (30%) + Duelist ratio (30%)
+            aggression_score = (
+                (fb_rate * 40) +
+                (min(avg_kd / 1.5, 1.0) * 30) +
+                (duelist_ratio * 30)
+            )
+            aggression_score = min(100, max(0, aggression_score))
+
+            # Calculate consistency score based on ACS variance approximation
+            avg_acs = data['total_acs'] / data['games']
+            # Higher ACS with more games = more consistent
+            consistency_score = min(100, (avg_acs / 300) * 50 + (min(data['games'], 10) / 10) * 50)
+
+            # Impact rating: weighted combination of ACS and K/D
+            impact_rating = (
+                (min(avg_acs / 300, 1.0) * 60) +
+                (min(avg_kd / 1.5, 1.0) * 40)
+            ) * 100
+            impact_rating = min(100, max(0, impact_rating))
+
+            # Determine playstyle tags
+            playstyle_tags = self._determine_playstyle_tags(
+                agents, fb_rate, avg_kd, primary_role, data
+            )
+
+            # Get agent pool (top 3)
+            sorted_agents = sorted(agents.items(), key=lambda x: x[1], reverse=True)
+            agent_pool = [a for a, _ in sorted_agents[:3]]
+
+            # Determine preferred site
+            preferred_site = self._infer_preferred_site(agents)
+
+            # Determine round presence (early/mid/late impact)
+            round_presence = self._infer_round_presence(fb_rate, primary_role, agents)
+
+            profiles.append(PlayerBehaviorProfile(
+                name=name,
+                primary_role=primary_role,
+                secondary_role=secondary_role,
+                aggression_score=aggression_score,
+                consistency_score=consistency_score,
+                impact_rating=impact_rating,
+                playstyle_tags=playstyle_tags,
+                agent_pool=agent_pool,
+                preferred_site=preferred_site,
+                round_presence=round_presence
+            ))
+
+        # Sort by impact rating
+        profiles.sort(key=lambda p: p.impact_rating, reverse=True)
+        return profiles
+
+    def _determine_playstyle_tags(
+        self,
+        agents: Dict[str, int],
+        fb_rate: float,
+        avg_kd: float,
+        primary_role: str,
+        player_data: Dict
+    ) -> List[str]:
+        """Determine playstyle tags for a player based on their stats and agents."""
+        tags = []
+
+        # Get most played agent's default tags
+        if agents:
+            top_agent = max(agents.items(), key=lambda x: x[1])[0]
+            default_tags = self.AGENT_PLAYSTYLES.get(top_agent, [])
+            tags.extend(default_tags[:2])  # Take top 2 default tags
+
+        # Add performance-based tags
+        if fb_rate > 0.55:
+            if 'Entry Fragger' not in tags:
+                tags.append('Entry Fragger')
+            tags.append('Aggressive Opener')
+        elif fb_rate < 0.35:
+            tags.append('Passive Player')
+
+        if avg_kd > 1.3:
+            tags.append('High Fragging')
+        elif avg_kd < 0.9:
+            tags.append('Utility Focus')
+
+        # Lurker detection: Yoru/Omen/Cypher players with good K/D but low FB
+        lurk_agents = {'Yoru', 'Omen', 'Cypher'}
+        lurk_picks = sum(agents.get(a, 0) for a in lurk_agents)
+        if lurk_picks > sum(agents.values()) * 0.3 and fb_rate < 0.45 and avg_kd > 1.0:
+            if 'Lurker' not in tags:
+                tags.append('Lurker')
+
+        # Clutch potential: Sentinel/Controller with good K/D
+        if primary_role in ['Sentinel', 'Controller'] and avg_kd > 1.1:
+            tags.append('Clutch Potential')
+
+        # Remove duplicates and limit
+        seen = set()
+        unique_tags = []
+        for tag in tags:
+            if tag not in seen:
+                seen.add(tag)
+                unique_tags.append(tag)
+        return unique_tags[:4]
+
+    def _infer_preferred_site(self, agents: Dict[str, int]) -> str:
+        """Infer preferred site based on agent picks."""
+        site_scores = {'A': 0, 'B': 0, 'Mid': 0, 'Flex': 0}
+        total = sum(agents.values())
+
+        for agent, count in agents.items():
+            pref = self.AGENT_SITE_PREFERENCE.get(agent, 'Flex')
+            site_scores[pref] += count
+
+        if total == 0:
+            return 'Flex'
+
+        # Determine dominant site preference
+        max_site = max(site_scores.items(), key=lambda x: x[1])
+        if max_site[1] / total > 0.5:
+            return max_site[0]
+        return 'Flex'
+
+    def _infer_round_presence(
+        self,
+        fb_rate: float,
+        primary_role: str,
+        agents: Dict[str, int]
+    ) -> str:
+        """Infer when the player typically has impact in rounds."""
+        # High FB rate = early round impact
+        if fb_rate > 0.5:
+            return 'Early'
+
+        # Duelists/Initiators = early-mid
+        if primary_role in ['Duelist', 'Initiator']:
+            return 'Early-Mid'
+
+        # Sentinels typically have late-round impact (retakes, post-plant)
+        if primary_role == 'Sentinel':
+            return 'Late'
+
+        # Controllers vary
+        lurk_agents = {'Omen', 'Viper'}
+        lurk_picks = sum(agents.get(a, 0) for a in lurk_agents)
+        if lurk_picks > sum(agents.values()) * 0.3:
+            return 'Mid-Late'
+
+        return 'Mid'
+
+    def _generate_team_composition(
+        self,
+        player_aggregates: Dict,
+        matches: List[Match]
+    ) -> Optional[TeamComposition]:
+        """Generate team composition analysis."""
+        if not player_aggregates and not matches:
+            return None
+
+        # Count role distribution
+        role_counts = defaultdict(int)
+        total_games = 0
+        all_agents = defaultdict(int)
+
+        for data in player_aggregates.values():
+            for agent, count in data['agents'].items():
+                role = self.AGENT_ROLES.get(agent, 'Unknown')
+                role_counts[role] += count
+                all_agents[agent] += count
+                total_games += count
+
+        # Average role per game (5 players per game)
+        games_played = total_games / 5 if total_games > 0 else 1
+        role_distribution = {
+            role: count / games_played
+            for role, count in role_counts.items()
+        }
+
+        # Find primary comp (most common agents)
+        sorted_agents = sorted(all_agents.items(), key=lambda x: x[1], reverse=True)
+        primary_comp = [a for a, _ in sorted_agents[:5]]
+
+        # Estimate comp frequency (rough approximation)
+        comp_frequency = 0.6  # Default assumption
+
+        # Identify flex players (play 3+ different agents)
+        flex_players = []
+        one_tricks = []
+        for data in player_aggregates.values():
+            unique_agents = len(data['agents'])
+            if unique_agents >= 3:
+                flex_players.append(data['name'])
+            elif unique_agents == 1 and data['games'] >= 3:
+                one_tricks.append(data['name'])
+
+        # Determine aggression style
+        total_fb = sum(d['total_first_bloods'] for d in player_aggregates.values())
+        total_fd = sum(d['total_first_deaths'] for d in player_aggregates.values())
+        fb_ratio = total_fb / max(total_fd, 1)
+
+        if fb_ratio > 1.2:
+            aggression_style = 'Aggressive'
+        elif fb_ratio < 0.8:
+            aggression_style = 'Passive'
+        else:
+            aggression_style = 'Balanced'
+
+        # Determine execute style based on agent composition
+        # Fast = multiple duelists, slow = multiple controllers/sentinels
+        duelist_count = role_counts.get('Duelist', 0)
+        controller_count = role_counts.get('Controller', 0)
+        sentinel_count = role_counts.get('Sentinel', 0)
+
+        if duelist_count > controller_count + sentinel_count:
+            execute_style = 'Fast'
+        elif sentinel_count + controller_count > duelist_count * 1.5:
+            execute_style = 'Slow'
+        else:
+            execute_style = 'Default'
+
+        return TeamComposition(
+            primary_comp=primary_comp,
+            comp_frequency=comp_frequency,
+            role_distribution=role_distribution,
+            flex_players=flex_players,
+            one_tricks=one_tricks,
+            aggression_style=aggression_style,
+            execute_style=execute_style
+        )
+
+    def _generate_economy_tendency(
+        self,
+        matches: List[Match],
+        player_aggregates: Dict
+    ) -> Optional[EconomyTendency]:
+        """
+        Generate economy tendency analysis.
+        Since we don't have round-by-round economy data, we infer from:
+        - Close games (might indicate force buys)
+        - Round differentials
+        - Sentinel picks (post-plant focus)
+        """
+        if not matches:
+            return None
+
+        # Analyze round differentials for economy inference
+        total_rounds_won = sum(m.team_score for m in matches)
+        total_rounds_lost = sum(m.opponent_score for m in matches)
+        total_rounds = total_rounds_won + total_rounds_lost
+
+        if total_rounds == 0:
+            return None
+
+        win_rate = total_rounds_won / total_rounds
+
+        # Infer force buy frequency from close games
+        close_games = [m for m in matches if abs(m.team_score - m.opponent_score) <= 3]
+        close_ratio = len(close_games) / max(len(matches), 1)
+
+        if close_ratio > 0.5:
+            force_buy_frequency = 'Often'
+        elif close_ratio > 0.3:
+            force_buy_frequency = 'Sometimes'
+        else:
+            force_buy_frequency = 'Rarely'
+
+        # Eco discipline inference from consistency
+        wins = sum(1 for m in matches if m.won)
+        win_pct = wins / max(len(matches), 1)
+        if win_pct > 0.6 and close_ratio < 0.4:
+            eco_discipline = 'Disciplined'
+        elif win_pct < 0.4:
+            eco_discipline = 'Chaotic'
+        else:
+            eco_discipline = 'Mixed'
+
+        # Save round effectiveness (inferred from overall performance)
+        avg_diff = (total_rounds_won - total_rounds_lost) / max(len(matches), 1)
+        if avg_diff > 2:
+            save_round_effectiveness = 'Strong'
+        elif avg_diff < -2:
+            save_round_effectiveness = 'Weak'
+        else:
+            save_round_effectiveness = 'Average'
+
+        # Post-plant focus from sentinel picks
+        sentinel_picks = 0
+        total_picks = 0
+        for data in player_aggregates.values():
+            for agent, count in data['agents'].items():
+                total_picks += count
+                if self.AGENT_ROLES.get(agent) == 'Sentinel':
+                    sentinel_picks += count
+
+        sentinel_ratio = sentinel_picks / max(total_picks, 1)
+        if sentinel_ratio > 0.25:
+            post_plant_focus = 'High'
+        elif sentinel_ratio > 0.15:
+            post_plant_focus = 'Medium'
+        else:
+            post_plant_focus = 'Low'
+
+        return EconomyTendency(
+            force_buy_frequency=force_buy_frequency,
+            eco_discipline=eco_discipline,
+            save_round_effectiveness=save_round_effectiveness,
+            post_plant_focus=post_plant_focus
+        )
