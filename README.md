@@ -1,6 +1,6 @@
 # C9 Scouting Generator (VALORANT)
 
-Winning submission for Category 2 of the Cloud9 x JetBrains Hackathon.
+Our submission for Category 2 of the Cloud9 x JetBrains Hackathon.
 
 ## Features
 - **Opinionated One-Pager:** No complex filters, just immediate coaching insights.
