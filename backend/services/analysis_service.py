@@ -24,8 +24,8 @@ class AnalysisService:
     HIGH_IMPACT_ACS = 250
     MEDIUM_IMPACT_ACS = 200
 
-    # All VALORANT maps in the current pool
-    ALL_MAPS = ["Abyss", "Ascent", "Bind", "Breeze", "Haven", "Icebox", "Lotus", "Pearl", "Split", "Sunset"]
+    # All VALORANT maps in the current competitive rotation
+    ALL_MAPS = ["Abyss", "Bind", "Breeze", "Corrode", "Haven", "Pearl", "Split"]
 
     # Agent role classifications
     AGENT_ROLES = {
@@ -219,9 +219,8 @@ class AnalysisService:
         else:
             # Demo mode: plausible "our" rates (fractions 0..1)
             our_rates = {
-                "haven": 0.72, "split": 0.45, "bind": 0.58, "ascent": 0.65,
-                "icebox": 0.52, "breeze": 0.48, "lotus": 0.55, "pearl": 0.60,
-                "sunset": 0.50, "abyss": 0.53
+                "haven": 0.72, "bind": 0.58, "breeze": 0.48,
+                "pearl": 0.60, "split": 0.45, "abyss": 0.53, "corrode": 0.55
             }
 
         recommendations: List[VetoRecommendation] = []
@@ -301,32 +300,30 @@ class AnalysisService:
         insights = []
 
         # Calculate aggregate stats
-        total_fb = sum(d['total_first_bloods'] for d in player_aggregates.values())
-        total_fd = sum(d['total_first_deaths'] for d in player_aggregates.values())
-        total_games = sum(d['games'] for d in player_aggregates.values()) / 5  # 5 players per game
-
-        fb_rate = total_fb / max(total_fb + total_fd, 1)
+        total_games = sum(d['games'] for d in player_aggregates.values()) / 5 if player_aggregates else 0  # 5 players per game
 
         # Find star player
-        star_player = max(player_aggregates.values(), key=lambda x: x['total_acs'] / max(x['games'], 1), default=None)
+        star_player = max(player_aggregates.values(), key=lambda x: x['total_acs'] / max(x['games'], 1), default=None) if player_aggregates else None
 
-        # Calculate pistol/eco approximation (using first blood as proxy for aggression)
-        # In real implementation, you'd have actual pistol round data
+        # Calculate team K/D for aggression insights
+        total_kills = sum(d['total_kills'] for d in player_aggregates.values())
+        total_deaths = sum(d['total_deaths'] for d in player_aggregates.values())
+        team_kd = total_kills / max(total_deaths, 1)
 
-        # TEMPLATE 1: First Blood Aggression
-        if fb_rate > 0.55:
+        # TEMPLATE 1: Team Aggression based on K/D
+        if team_kd > 1.15:
             insights.append(TacticalInsight(
                 category="OPENING",
-                title="Aggressive Openers",
-                description=f"They win {fb_rate*100:.0f}% of opening duels. Play passive angles on pistol rounds (1 & 13) to deny their aggression. Don't peek dry.",
+                title="High Fragging Team",
+                description=f"Team K/D of {team_kd:.2f} indicates strong mechanical skill. Expect confident aim duels. Use utility to avoid dry peeks.",
                 severity="WARNING",
                 icon="!"
             ))
-        elif fb_rate < 0.45:
+        elif team_kd < 0.95:
             insights.append(TacticalInsight(
                 category="OPENING",
-                title="Vulnerable to Early Pressure",
-                description=f"They lose {(1-fb_rate)*100:.0f}% of opening duels. Apply early pressure with aggressive utility and fast peeks.",
+                title="Vulnerable to Aggression",
+                description=f"Team K/D of {team_kd:.2f} suggests they struggle in duels. Apply early pressure and take aim fights.",
                 severity="TIP",
                 icon="+"
             ))
@@ -614,7 +611,7 @@ class AnalysisService:
             player_stats=player_stats,
             map_stats=map_stats,
             matches_analyzed=12,
-            date_range="Jan 15 - Feb 1, 2025",
+            date_range="Jan 15 - Feb 3, 2026",
             veto_recommendations=veto_recommendations,
             tactical_insights=tactical_insights,
             map_pool_matrix=map_pool_matrix,
@@ -856,22 +853,20 @@ class AnalysisService:
             secondary_role = sorted_roles[1][0] if len(sorted_roles) > 1 else ''
 
             # Calculate aggression score (0-100)
-            # Based on: first blood rate, K/D ratio, and duelist picks
+            # Based on: K/D ratio and duelist/initiator picks (no FB data from GRID)
             avg_kd = data['total_kills'] / max(data['total_deaths'], 1)
-            fb_rate = data['total_first_bloods'] / max(
-                data['total_first_bloods'] + data['total_first_deaths'], 1
-            )
 
-            # Duelist ratio affects aggression
+            # Duelist/Initiator ratio affects aggression
             total_picks = sum(agents.values())
             duelist_ratio = role_counts.get('Duelist', 0) / max(total_picks, 1)
+            initiator_ratio = role_counts.get('Initiator', 0) / max(total_picks, 1)
 
-            # Aggression formula: FB rate (40%) + K/D normalized (30%) + Duelist ratio (30%)
+            # Aggression formula: K/D normalized (50%) + Duelist ratio (35%) + Initiator ratio (15%)
             aggression_score = (
-                (fb_rate * 40) +
-                (min(avg_kd / 1.5, 1.0) * 30) +
-                (duelist_ratio * 30)
-            )
+                (min(avg_kd / 1.5, 1.0) * 50) +
+                (duelist_ratio * 35) +
+                (initiator_ratio * 15)
+            ) * 100
             aggression_score = min(100, max(0, aggression_score))
 
             # Calculate consistency score based on ACS variance approximation
@@ -888,7 +883,7 @@ class AnalysisService:
 
             # Determine playstyle tags
             playstyle_tags = self._determine_playstyle_tags(
-                agents, fb_rate, avg_kd, primary_role, data
+                agents, avg_kd, primary_role, data
             )
 
             # Get agent pool (top 3)
@@ -899,7 +894,7 @@ class AnalysisService:
             preferred_site = self._infer_preferred_site(agents)
 
             # Determine round presence (early/mid/late impact)
-            round_presence = self._infer_round_presence(fb_rate, primary_role, agents)
+            round_presence = self._infer_round_presence(primary_role, agents)
 
             profiles.append(PlayerBehaviorProfile(
                 name=name,
@@ -921,7 +916,6 @@ class AnalysisService:
     def _determine_playstyle_tags(
         self,
         agents: Dict[str, int],
-        fb_rate: float,
         avg_kd: float,
         primary_role: str,
         player_data: Dict
@@ -936,22 +930,20 @@ class AnalysisService:
             tags.extend(default_tags[:2])  # Take top 2 default tags
 
         # Add performance-based tags
-        if fb_rate > 0.55:
-            if 'Entry Fragger' not in tags:
-                tags.append('Entry Fragger')
-            tags.append('Aggressive Opener')
-        elif fb_rate < 0.35:
-            tags.append('Passive Player')
-
         if avg_kd > 1.3:
             tags.append('High Fragging')
         elif avg_kd < 0.9:
             tags.append('Utility Focus')
 
-        # Lurker detection: Yoru/Omen/Cypher players with good K/D but low FB
+        # Entry fragger detection: Duelist players with high K/D
+        if primary_role == 'Duelist' and avg_kd > 1.1:
+            if 'Entry Fragger' not in tags:
+                tags.append('Entry Fragger')
+
+        # Lurker detection: Yoru/Omen/Cypher players with good K/D
         lurk_agents = {'Yoru', 'Omen', 'Cypher'}
         lurk_picks = sum(agents.get(a, 0) for a in lurk_agents)
-        if lurk_picks > sum(agents.values()) * 0.3 and fb_rate < 0.45 and avg_kd > 1.0:
+        if lurk_picks > sum(agents.values()) * 0.3 and avg_kd > 1.0:
             if 'Lurker' not in tags:
                 tags.append('Lurker')
 
@@ -988,24 +980,23 @@ class AnalysisService:
 
     def _infer_round_presence(
         self,
-        fb_rate: float,
         primary_role: str,
         agents: Dict[str, int]
     ) -> str:
-        """Infer when the player typically has impact in rounds."""
-        # High FB rate = early round impact
-        if fb_rate > 0.5:
+        """Infer when the player typically has impact in rounds based on role."""
+        # Duelists = early round impact
+        if primary_role == 'Duelist':
             return 'Early'
 
-        # Duelists/Initiators = early-mid
-        if primary_role in ['Duelist', 'Initiator']:
+        # Initiators = early-mid
+        if primary_role == 'Initiator':
             return 'Early-Mid'
 
         # Sentinels typically have late-round impact (retakes, post-plant)
         if primary_role == 'Sentinel':
             return 'Late'
 
-        # Controllers vary
+        # Controllers vary based on agent
         lurk_agents = {'Omen', 'Viper'}
         lurk_picks = sum(agents.get(a, 0) for a in lurk_agents)
         if lurk_picks > sum(agents.values()) * 0.3:

@@ -3,18 +3,15 @@ import axios from 'axios';
 
 const API_BASE = 'http://localhost:5001';
 
-// Map image paths - add your map images to /public/maps/{mapname}.png or .jpg
+// Map image paths - current competitive rotation
 const MAP_IMAGES: { [key: string]: string } = {
   'Abyss': '/maps/abyss.png',
-  'Ascent': '/maps/ascent.png',
   'Bind': '/maps/bind.png',
   'Breeze': '/maps/breeze.png',
+  'Corrode': '/maps/corrode.png',
   'Haven': '/maps/haven.png',
-  'Icebox': '/maps/icebox.png',
-  'Lotus': '/maps/lotus.png',
   'Pearl': '/maps/pearl.png',
   'Split': '/maps/split.png',
-  'Sunset': '/maps/sunset.png',
 };
 
 // Helper to get map image with fallback
@@ -386,10 +383,12 @@ const PlayerBehaviorSection = ({ profiles, coachMode }: { profiles: PlayerBehavi
             <div className="flex flex-wrap justify-between items-center gap-2 mb-3">
               <div className="flex items-center gap-2">
                 <span className="font-bold text-lg">{profile.name}</span>
-                <span className={`px-2 py-0.5 rounded text-xs font-bold ${getRoleColor(profile.primary_role)}`}>
-                  {profile.primary_role}
-                </span>
-                {profile.secondary_role && (
+                {profile.primary_role && profile.primary_role !== 'Unknown' && (
+                  <span className={`px-2 py-0.5 rounded text-xs font-bold ${getRoleColor(profile.primary_role)}`}>
+                    {profile.primary_role}
+                  </span>
+                )}
+                {profile.secondary_role && profile.secondary_role !== 'Unknown' && (
                   <span className={`px-2 py-0.5 rounded text-xs ${coachMode ? 'bg-gray-300' : 'bg-gray-600'}`}>
                     {profile.secondary_role}
                   </span>
@@ -422,18 +421,6 @@ const PlayerBehaviorSection = ({ profiles, coachMode }: { profiles: PlayerBehavi
                   style={{ width: `${profile.aggression_score}%` }}
                 />
               </div>
-            </div>
-
-            {/* Round Presence */}
-            <div className="flex items-center gap-2 mb-3">
-              <span className={`text-xs ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>Impact Timing:</span>
-              <span className={`text-xs px-2 py-0.5 rounded font-semibold ${
-                profile.round_presence === 'Early' ? 'bg-red-500/30 text-red-300' :
-                profile.round_presence === 'Late' ? 'bg-blue-500/30 text-blue-300' :
-                'bg-yellow-500/30 text-yellow-300'
-              }`}>
-                {profile.round_presence} Round
-              </span>
             </div>
 
             {/* Playstyle Tags */}
@@ -654,10 +641,9 @@ const PlayerStatsSection = ({ players, coachMode }: { players: PlayerStats[], co
                 </span>
               ))}
             </div>
-            <div className="grid grid-cols-3 gap-2 text-sm">
+            <div className="grid grid-cols-2 gap-2 text-sm">
               <div><span className="opacity-60">ACS:</span> <strong>{player.avg_acs}</strong></div>
               <div><span className="opacity-60">K/D:</span> <strong>{player.avg_kd}</strong></div>
-              <div><span className="opacity-60">FB%:</span> <strong>{player.first_blood_rate}%</strong></div>
             </div>
           </div>
         ))}
@@ -1073,11 +1059,57 @@ function App() {
               </div>
             </div>
 
-            {/* Recommendation Summary */}
-            <section className={`p-6 border-l-8 border-c9-blue ${coachMode ? 'bg-gray-100' : 'bg-gray-800'}`}>
-              <h2 className="text-sm uppercase tracking-widest text-c9-blue mb-2">Game Plan</h2>
-              <p className="text-xl font-bold">{comparisonReport.recommendation}</p>
-            </section>
+            {/* Game Plan - 3 Cards */}
+            <div className="grid md:grid-cols-3 gap-4">
+              {/* Maps to Pick */}
+              <div className={`p-5 rounded-lg border-l-4 border-green-500 ${coachMode ? 'bg-green-50' : 'bg-green-900/20'}`}>
+                <h3 className="text-sm uppercase tracking-widest text-green-500 mb-2 font-semibold">Maps to Pick</h3>
+                <div className="space-y-1">
+                  {comparisonReport.map_advantages
+                    .filter(m => m.advantage === 'yours')
+                    .slice(0, 2)
+                    .map(m => (
+                      <div key={m.map} className="flex items-center gap-2">
+                        <MapThumbnail mapName={m.map} size="sm" />
+                        <span className="font-bold text-lg">{m.map}</span>
+                        <span className={`text-xs ${coachMode ? 'text-green-700' : 'text-green-400'}`}>+{(m.your_win_rate - m.opponent_win_rate).toFixed(0)}%</span>
+                      </div>
+                    ))}
+                  {comparisonReport.map_advantages.filter(m => m.advantage === 'yours').length === 0 && (
+                    <p className={`text-sm ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>No clear pick advantage</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Maps to Ban */}
+              <div className={`p-5 rounded-lg border-l-4 border-red-500 ${coachMode ? 'bg-red-50' : 'bg-red-900/20'}`}>
+                <h3 className="text-sm uppercase tracking-widest text-red-500 mb-2 font-semibold">Maps to Ban</h3>
+                <div className="space-y-1">
+                  {comparisonReport.map_advantages
+                    .filter(m => m.advantage === 'opponent')
+                    .slice(0, 2)
+                    .map(m => (
+                      <div key={m.map} className="flex items-center gap-2">
+                        <MapThumbnail mapName={m.map} size="sm" />
+                        <span className="font-bold text-lg">{m.map}</span>
+                        <span className={`text-xs ${coachMode ? 'text-red-700' : 'text-red-400'}`}>{(m.your_win_rate - m.opponent_win_rate).toFixed(0)}%</span>
+                      </div>
+                    ))}
+                  {comparisonReport.map_advantages.filter(m => m.advantage === 'opponent').length === 0 && (
+                    <p className={`text-sm ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>No maps to avoid</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Key Threat */}
+              <div className={`p-5 rounded-lg border-l-4 border-yellow-500 ${coachMode ? 'bg-yellow-50' : 'bg-yellow-900/20'}`}>
+                <h3 className="text-sm uppercase tracking-widest text-yellow-500 mb-2 font-semibold">Key Threat</h3>
+                <p className="font-bold text-xl">{comparisonReport.opponent.summary.primary_threat}</p>
+                <p className={`text-sm mt-1 ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>
+                  Neutralize early to disrupt their gameplan
+                </p>
+              </div>
+            </div>
 
             {/* Map Advantages */}
             <MapAdvantagesSection

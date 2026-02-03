@@ -298,12 +298,16 @@ def compare_teams():
             opponent_team_id, opponent_team.name, opponent_matches, your_team_stats
         )
 
-        # Find map advantages
+        # Find map advantages (only for maps in current rotation)
         your_maps = {m.map_name: m for m in your_report.map_stats}
         opponent_maps = {m.map_name: m for m in opponent_report.map_stats}
+        rotation_maps = set(m.lower() for m in AnalysisService.ALL_MAPS)
 
         map_advantages = []
         for map_name in set(your_maps.keys()) | set(opponent_maps.keys()):
+            # Skip maps not in current rotation
+            if map_name.lower() not in rotation_maps:
+                continue
             your_wr = your_maps.get(map_name, MapStats(map_name, 0, 0, 0)).win_rate if map_name in your_maps else 0
             opp_wr = opponent_maps.get(map_name, MapStats(map_name, 0, 0, 0)).win_rate if map_name in opponent_maps else 0
 
