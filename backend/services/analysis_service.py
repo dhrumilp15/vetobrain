@@ -56,11 +56,11 @@ class AnalysisService:
         # Analyze map performance
         map_stats = self._analyze_map_performance(matches)
 
-        # Check if we have actual player data - if not, use demo player stats
+        # Check if we have actual player data
         if not player_aggregates:
-            logger.warning(f"No player data found for team {team_name}, using demo player stats")
-            player_stats = self._get_demo_player_stats()
-            primary_threat = "Unknown (no player data)"
+            logger.warning(f"No player data found for team {team_name}")
+            player_stats = []
+            primary_threat = "Unknown (no player data available)"
             threat_reason = "insufficient data"
         else:
             # Identify primary threat

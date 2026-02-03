@@ -177,10 +177,10 @@ class GridService:
         if cached:
             return cached
 
-        # Simplified query - start minimal and expand based on what works
+        # Query for recent series using 'last' to get most recent matches
         query = """
-        query GetTeamSeries($filter: SeriesFilter, $first: Int) {
-            allSeries(filter: $filter, first: $first) {
+        query GetTeamSeries($filter: SeriesFilter, $last: Int) {
+            allSeries(filter: $filter, last: $last) {
                 edges {
                     node {
                         id
@@ -207,7 +207,7 @@ class GridService:
                 "teamIds": {"in": [team_id]},
                 "type": "ESPORTS"
             },
-            "first": limit
+            "last": limit
         }
 
         try:
@@ -237,7 +237,8 @@ class GridService:
         if cached:
             return cached
 
-        # Start with a simpler query and expand once we know the schema
+        # Query for series state with player statistics
+        # Note: GRID API has kills/deaths as integers, not detailed lists
         query = """
         query GetSeriesState($id: ID!) {
             seriesState(id: $id) {
@@ -260,6 +261,8 @@ class GridService:
                             character {
                                 name
                             }
+                            kills
+                            deaths
                         }
                     }
                 }
@@ -382,41 +385,17 @@ class GridService:
             player_name = player_data.get("name", "Unknown")
             agent = player_data.get("character", {}).get("name", "Unknown") if player_data.get("character") else "Unknown"
 
-            # Try to get detailed stats if available
-            stats_by_round = player_data.get("statsByRound", [])
-            if stats_by_round:
-                total_kills = sum(s.get("kills", 0) for s in stats_by_round)
-                total_deaths = sum(s.get("deaths", 0) for s in stats_by_round)
-                total_assists = sum(s.get("assists", 0) for s in stats_by_round)
-                total_damage = sum(s.get("damage", 0) for s in stats_by_round)
-                total_combat_score = sum(s.get("combatScore", 0) for s in stats_by_round)
-                num_rounds = len(stats_by_round)
-            else:
-                # Fallback to direct stats if available
-                total_kills = player_data.get("kills", 0) if isinstance(player_data.get("kills"), int) else 0
-                total_deaths = player_data.get("deaths", 0) if isinstance(player_data.get("deaths"), int) else 0
-                total_assists = player_data.get("assists", 0) if isinstance(player_data.get("assists"), int) else 0
-                total_damage = 0
-                total_combat_score = 0
-                num_rounds = 1
+            # GRID API returns kills/deaths as integers
+            total_kills = player_data.get("kills", 0) or 0
+            total_deaths = player_data.get("deaths", 0) or 0
+            total_assists = 0  # Not available in basic API
 
-            # First bloods and deaths (if detailed data available)
-            kills_list = player_data.get("kills", []) if isinstance(player_data.get("kills"), list) else []
-            deaths_list = player_data.get("deaths", []) if isinstance(player_data.get("deaths"), list) else []
-            first_bloods = sum(1 for k in kills_list if isinstance(k, dict) and k.get("isFirstBlood"))
-            first_deaths = sum(1 for d in deaths_list if isinstance(d, dict) and d.get("isFirstDeath"))
-            headshots = sum(1 for k in kills_list if isinstance(k, dict) and k.get("isHeadshot"))
+            # Estimate ACS from kills (rough approximation: ~250 ACS per kill ratio of 1.0)
+            # This is a simplification since we don't have actual combat score data
+            kd_ratio = total_kills / max(total_deaths, 1)
+            estimated_acs = 200 * kd_ratio  # Rough estimate based on K/D
 
-            # Plants and defuses
-            plants = len(player_data.get("plants", [])) if isinstance(player_data.get("plants"), list) else 0
-            defuses = len(player_data.get("defuses", [])) if isinstance(player_data.get("defuses"), list) else 0
-
-            # Calculate averages
-            acs = total_combat_score / num_rounds if num_rounds > 0 else 0
-            adr = total_damage / num_rounds if num_rounds > 0 else 0
-            hs_pct = (headshots / total_kills * 100) if total_kills > 0 else 0
-
-            logger.debug(f"Parsed player {player_name}: agent={agent}, kills={total_kills}")
+            logger.info(f"Parsed player {player_name}: agent={agent}, kills={total_kills}, deaths={total_deaths}, est_acs={estimated_acs:.1f}")
 
             return PlayerMatchStats(
                 player_id=player_id,
@@ -425,14 +404,14 @@ class GridService:
                 kills=total_kills,
                 deaths=total_deaths,
                 assists=total_assists,
-                acs=acs,
-                adr=adr,
-                first_bloods=first_bloods,
-                first_deaths=first_deaths,
-                plants=plants,
-                defuses=defuses,
-                headshot_pct=hs_pct
+                acs=estimated_acs,
+                adr=0,  # Not available
+                first_bloods=0,  # Not available in basic API
+                first_deaths=0,
+                plants=0,
+                defuses=0,
+                headshot_pct=0
             )
         except Exception as e:
-            logger.error(f"Failed to parse player stats: {e}")
+            logger.error(f"Failed to parse player stats: {e}", exc_info=True)
             return None

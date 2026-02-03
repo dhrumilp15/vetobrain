@@ -74,6 +74,22 @@ interface ScoutReport {
   map_pool_matrix: MapPoolEntry[];
 }
 
+interface MapAdvantage {
+  map: string;
+  your_win_rate: number;
+  opponent_win_rate: number;
+  advantage: 'yours' | 'opponent' | 'neutral';
+}
+
+interface ComparisonReport {
+  your_team: ScoutReport;
+  opponent: ScoutReport;
+  map_advantages: MapAdvantage[];
+  recommendation: string;
+}
+
+type ScoutMode = 'single' | 'h2h';
+
 // Veto Recommendation Engine Component - THE HERO FEATURE
 const VetoEngine = ({ recommendations, coachMode }: { recommendations: VetoRecommendation[], coachMode: boolean }) => {
   const getRecommendationStyle = (rec: string) => {
@@ -285,31 +301,130 @@ const PlayerStatsSection = ({ players, coachMode }: { players: PlayerStats[], co
   );
 };
 
-// Team Search Dropdown
-const TeamSearchDropdown = ({
-  teams, onSelect, loading, coachMode
-}: { teams: Team[], onSelect: (team: Team) => void, loading: boolean, coachMode: boolean }) => {
-  if (loading) {
-    return (
-      <div className={`absolute w-full mt-1 p-4 rounded-lg shadow-lg z-10 ${coachMode ? 'bg-gray-100' : 'bg-gray-800'}`}>
-        <div className="animate-pulse">Searching...</div>
-      </div>
-    );
-  }
-  if (teams.length === 0) return null;
+// Team Search Input with Dropdown
+const TeamSearchInput = ({
+  label,
+  placeholder,
+  searchTerm,
+  setSearchTerm,
+  selectedTeam,
+  setSelectedTeam,
+  searchResults,
+  searchLoading,
+  coachMode
+}: {
+  label: string;
+  placeholder: string;
+  searchTerm: string;
+  setSearchTerm: (term: string) => void;
+  selectedTeam: Team | null;
+  setSelectedTeam: (team: Team | null) => void;
+  searchResults: Team[];
+  searchLoading: boolean;
+  coachMode: boolean;
+}) => {
+  const [showDropdown, setShowDropdown] = useState(false);
+
+  const handleSelect = (team: Team) => {
+    setSelectedTeam(team);
+    setSearchTerm(team.name);
+    setShowDropdown(false);
+  };
 
   return (
-    <div className={`absolute w-full mt-1 rounded-lg shadow-lg z-10 max-h-60 overflow-y-auto ${coachMode ? 'bg-white border border-gray-300' : 'bg-gray-800'}`}>
-      {teams.map(team => (
-        <button
-          key={team.id}
-          onClick={() => onSelect(team)}
-          className={`w-full text-left px-4 py-3 ${coachMode ? 'hover:bg-gray-100' : 'hover:bg-gray-700'} transition`}
-        >
-          <div className="font-semibold">{team.name}</div>
-        </button>
-      ))}
+    <div className="w-full">
+      <label className={`block text-sm font-semibold mb-2 ${coachMode ? 'text-gray-700' : 'text-gray-300'}`}>
+        {label}
+      </label>
+      <div className="relative">
+        <input
+          type="text"
+          placeholder={placeholder}
+          className={`px-4 py-3 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-c9-blue ${
+            coachMode ? 'bg-gray-100 text-black' : 'bg-gray-800 text-white'
+          } ${selectedTeam ? 'border-2 border-green-500' : ''}`}
+          value={searchTerm}
+          onChange={(e) => {
+            setSearchTerm(e.target.value);
+            setSelectedTeam(null);
+            setShowDropdown(true);
+          }}
+          onFocus={() => setShowDropdown(true)}
+          onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
+        />
+        {selectedTeam && (
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500">✓</span>
+        )}
+        {showDropdown && (searchLoading || searchResults.length > 0) && (
+          <div className={`absolute w-full mt-1 rounded-lg shadow-lg z-10 max-h-60 overflow-y-auto ${
+            coachMode ? 'bg-white border border-gray-300' : 'bg-gray-800'
+          }`}>
+            {searchLoading ? (
+              <div className="p-4 animate-pulse">Searching...</div>
+            ) : (
+              searchResults.map(team => (
+                <button
+                  key={team.id}
+                  onClick={() => handleSelect(team)}
+                  className={`w-full text-left px-4 py-3 ${coachMode ? 'hover:bg-gray-100' : 'hover:bg-gray-700'} transition`}
+                >
+                  <div className="font-semibold">{team.name}</div>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
     </div>
+  );
+};
+
+// Map Advantages Component for H2H
+const MapAdvantagesSection = ({ advantages, yourTeamName, opponentName, coachMode }: {
+  advantages: MapAdvantage[];
+  yourTeamName: string;
+  opponentName: string;
+  coachMode: boolean;
+}) => {
+  return (
+    <section className={`p-6 rounded-lg ${coachMode ? 'border-2 border-black bg-gray-50' : 'bg-gray-800'}`}>
+      <h3 className="text-2xl font-bold mb-2 text-c9-blue">Map Advantages</h3>
+      <p className={`text-sm mb-4 ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>
+        Direct comparison of win rates per map
+      </p>
+      <div className="space-y-2">
+        {advantages.map((adv) => (
+          <div
+            key={adv.map}
+            className={`flex items-center justify-between p-3 rounded-lg ${
+              adv.advantage === 'yours' ? 'bg-green-600/30' :
+              adv.advantage === 'opponent' ? 'bg-red-600/30' :
+              'bg-yellow-600/30'
+            }`}
+          >
+            <div className="flex items-center gap-4">
+              <span className="font-bold text-lg">{adv.map}</span>
+              <span className={`text-xs px-2 py-1 rounded ${
+                adv.advantage === 'yours' ? 'bg-green-600 text-white' :
+                adv.advantage === 'opponent' ? 'bg-red-600 text-white' :
+                'bg-yellow-600 text-black'
+              }`}>
+                {adv.advantage === 'yours' ? 'YOUR ADVANTAGE' :
+                 adv.advantage === 'opponent' ? 'THEIR ADVANTAGE' : 'NEUTRAL'}
+              </span>
+            </div>
+            <div className="flex items-center gap-6 text-sm">
+              <span className={`${adv.advantage === 'yours' ? 'text-green-400 font-bold' : ''}`}>
+                {yourTeamName}: {adv.your_win_rate}%
+              </span>
+              <span className={`${adv.advantage === 'opponent' ? 'text-red-400 font-bold' : ''}`}>
+                {opponentName}: {adv.opponent_win_rate}%
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 };
 
@@ -324,73 +439,138 @@ function useDebounce<T>(value: T, delay: number): T {
 }
 
 function App() {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
-  const [searchResults, setSearchResults] = useState<Team[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
+  // Mode selection
+  const [scoutMode, setScoutMode] = useState<ScoutMode>('h2h');
+
+  // Your team state (for H2H)
+  const [yourTeamSearch, setYourTeamSearch] = useState('');
+  const [yourTeam, setYourTeam] = useState<Team | null>(null);
+  const [yourTeamResults, setYourTeamResults] = useState<Team[]>([]);
+  const [yourTeamLoading, setYourTeamLoading] = useState(false);
+
+  // Opponent team state
+  const [opponentSearch, setOpponentSearch] = useState('');
+  const [opponentTeam, setOpponentTeam] = useState<Team | null>(null);
+  const [opponentResults, setOpponentResults] = useState<Team[]>([]);
+  const [opponentLoading, setOpponentLoading] = useState(false);
+
+  // Report state
   const [report, setReport] = useState<ScoutReport | null>(null);
+  const [comparisonReport, setComparisonReport] = useState<ComparisonReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [coachMode, setCoachMode] = useState(false);
 
-  const debouncedSearch = useDebounce(searchTerm, 300);
+  const debouncedYourTeam = useDebounce(yourTeamSearch, 300);
+  const debouncedOpponent = useDebounce(opponentSearch, 300);
 
+  // Search for your team
   useEffect(() => {
     const searchTeams = async () => {
-      if (debouncedSearch.length < 2) {
-        setSearchResults([]);
+      if (debouncedYourTeam.length < 2) {
+        setYourTeamResults([]);
         return;
       }
-      setSearchLoading(true);
+      setYourTeamLoading(true);
       try {
         const response = await axios.get(`${API_BASE}/api/teams`, {
-          params: { search: debouncedSearch }
+          params: { search: debouncedYourTeam }
         });
-        setSearchResults(response.data.teams || []);
+        setYourTeamResults(response.data.teams || []);
       } catch {
-        setSearchResults([]);
+        setYourTeamResults([]);
       } finally {
-        setSearchLoading(false);
+        setYourTeamLoading(false);
       }
     };
     searchTeams();
-  }, [debouncedSearch]);
+  }, [debouncedYourTeam]);
 
-  const handleTeamSelect = (team: Team) => {
-    setSelectedTeam(team);
-    setSearchTerm(team.name);
-    setSearchResults([]);
-  };
+  // Search for opponent team
+  useEffect(() => {
+    const searchTeams = async () => {
+      if (debouncedOpponent.length < 2) {
+        setOpponentResults([]);
+        return;
+      }
+      setOpponentLoading(true);
+      try {
+        const response = await axios.get(`${API_BASE}/api/teams`, {
+          params: { search: debouncedOpponent }
+        });
+        setOpponentResults(response.data.teams || []);
+      } catch {
+        setOpponentResults([]);
+      } finally {
+        setOpponentLoading(false);
+      }
+    };
+    searchTeams();
+  }, [debouncedOpponent]);
 
   const handleScout = useCallback(async () => {
-    if (!selectedTeam && searchTerm.length < 2) {
-      setError('Please enter a team name');
-      return;
-    }
-
-    setLoading(true);
     setError(null);
 
-    try {
-      const payload = selectedTeam
-        ? { team_id: selectedTeam.id, team_name: selectedTeam.name }
-        : { team_name: searchTerm };
+    if (scoutMode === 'h2h') {
+      // H2H comparison mode
+      if (!yourTeam || !opponentTeam) {
+        setError('Please select both teams for head-to-head comparison');
+        return;
+      }
 
-      const response = await axios.post(`${API_BASE}/api/scout`, payload);
-      setReport(response.data);
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to generate report');
-    } finally {
-      setLoading(false);
+      setLoading(true);
+      try {
+        const response = await axios.post(`${API_BASE}/api/scout/compare`, {
+          your_team_id: yourTeam.id,
+          opponent_team_id: opponentTeam.id
+        });
+        setComparisonReport(response.data);
+        setReport(null);
+      } catch (err: any) {
+        setError(err.response?.data?.error || 'Failed to generate comparison');
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      // Single team scout mode
+      if (!opponentTeam && opponentSearch.length < 2) {
+        setError('Please enter a team name');
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const payload = opponentTeam
+          ? { team_id: opponentTeam.id, team_name: opponentTeam.name }
+          : { team_name: opponentSearch };
+
+        // Include your team ID if selected for better veto recommendations
+        if (yourTeam) {
+          (payload as any).our_team_id = yourTeam.id;
+        }
+
+        const response = await axios.post(`${API_BASE}/api/scout`, payload);
+        setReport(response.data);
+        setComparisonReport(null);
+      } catch (err: any) {
+        setError(err.response?.data?.error || 'Failed to generate report');
+      } finally {
+        setLoading(false);
+      }
     }
-  }, [selectedTeam, searchTerm]);
+  }, [scoutMode, yourTeam, opponentTeam, opponentSearch]);
 
   const handleReset = () => {
     setReport(null);
-    setSelectedTeam(null);
-    setSearchTerm('');
+    setComparisonReport(null);
+    setYourTeam(null);
+    setOpponentTeam(null);
+    setYourTeamSearch('');
+    setOpponentSearch('');
     setError(null);
   };
+
+  const hasReport = report || comparisonReport;
 
   return (
     <div className={`min-h-screen p-4 md:p-8 ${coachMode ? 'bg-white text-black' : 'bg-c9-dark text-white'}`}>
@@ -410,54 +590,174 @@ function App() {
           </button>
         </header>
 
-        {!report ? (
-          <div className="text-center py-12">
-            <h2 className="text-2xl font-bold mb-6">Scout an Opponent</h2>
-            <div className="relative inline-block w-full max-w-md">
-              <input
-                type="text"
-                placeholder="Search team (e.g. Sentinels, LOUD)"
-                className={`px-6 py-4 rounded-lg w-full text-lg focus:outline-none focus:ring-2 focus:ring-c9-blue ${
-                  coachMode ? 'bg-gray-100 text-black' : 'bg-gray-800 text-white'
-                }`}
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setSelectedTeam(null);
-                }}
-                onKeyDown={(e) => e.key === 'Enter' && handleScout()}
-              />
-              <TeamSearchDropdown
-                teams={searchResults}
-                onSelect={handleTeamSelect}
-                loading={searchLoading}
-                coachMode={coachMode}
-              />
-            </div>
-
-            <div className="mt-6">
+        {!hasReport ? (
+          <div className="py-8">
+            {/* Mode Selection */}
+            <div className="flex justify-center gap-4 mb-8">
               <button
-                onClick={handleScout}
-                className="bg-c9-blue px-10 py-4 rounded-lg font-bold text-lg hover:bg-opacity-80 transition disabled:opacity-50"
-                disabled={loading || (searchTerm.length < 2 && !selectedTeam)}
+                onClick={() => setScoutMode('h2h')}
+                className={`px-6 py-3 rounded-lg font-semibold transition ${
+                  scoutMode === 'h2h'
+                    ? 'bg-c9-blue text-white'
+                    : coachMode ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-800 hover:bg-gray-700'
+                }`}
               >
-                {loading ? 'Generating Report...' : 'Generate Scout Report'}
+                Head-to-Head
+              </button>
+              <button
+                onClick={() => setScoutMode('single')}
+                className={`px-6 py-3 rounded-lg font-semibold transition ${
+                  scoutMode === 'single'
+                    ? 'bg-c9-blue text-white'
+                    : coachMode ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-800 hover:bg-gray-700'
+                }`}
+              >
+                Scout Single Team
               </button>
             </div>
 
-            {loading && (
-              <div className="mt-8">
-                <div className="animate-pulse text-xl text-c9-blue">Analyzing match data...</div>
-              </div>
-            )}
+            {/* Team Selection */}
+            <div className={`max-w-2xl mx-auto p-6 rounded-lg ${coachMode ? 'bg-gray-50 border-2 border-gray-200' : 'bg-gray-800/50'}`}>
+              <h2 className="text-2xl font-bold mb-6 text-center">
+                {scoutMode === 'h2h' ? 'Select Both Teams' : 'Scout an Opponent'}
+              </h2>
 
-            {error && (
-              <div className="mt-8 p-4 bg-red-500/20 border border-red-500 rounded-lg inline-block">
-                <p className="text-red-500">{error}</p>
+              <div className={`space-y-6 ${scoutMode === 'h2h' ? '' : ''}`}>
+                {/* Your Team (always shown in H2H, optional in single) */}
+                {scoutMode === 'h2h' && (
+                  <TeamSearchInput
+                    label="Your Team"
+                    placeholder="Search your team..."
+                    searchTerm={yourTeamSearch}
+                    setSearchTerm={setYourTeamSearch}
+                    selectedTeam={yourTeam}
+                    setSelectedTeam={setYourTeam}
+                    searchResults={yourTeamResults}
+                    searchLoading={yourTeamLoading}
+                    coachMode={coachMode}
+                  />
+                )}
+
+                {/* VS Divider for H2H */}
+                {scoutMode === 'h2h' && (
+                  <div className="flex items-center gap-4">
+                    <div className={`flex-1 h-px ${coachMode ? 'bg-gray-300' : 'bg-gray-600'}`}></div>
+                    <span className="text-2xl font-bold text-c9-blue">VS</span>
+                    <div className={`flex-1 h-px ${coachMode ? 'bg-gray-300' : 'bg-gray-600'}`}></div>
+                  </div>
+                )}
+
+                {/* Opponent Team */}
+                <TeamSearchInput
+                  label={scoutMode === 'h2h' ? 'Opponent Team' : 'Team to Scout'}
+                  placeholder="Search opponent team..."
+                  searchTerm={opponentSearch}
+                  setSearchTerm={setOpponentSearch}
+                  selectedTeam={opponentTeam}
+                  setSelectedTeam={setOpponentTeam}
+                  searchResults={opponentResults}
+                  searchLoading={opponentLoading}
+                  coachMode={coachMode}
+                />
               </div>
-            )}
+
+              {/* Generate Button */}
+              <div className="mt-8 text-center">
+                <button
+                  onClick={handleScout}
+                  className="bg-c9-blue px-10 py-4 rounded-lg font-bold text-lg hover:bg-opacity-80 transition disabled:opacity-50 text-white"
+                  disabled={loading || (scoutMode === 'h2h' ? (!yourTeam || !opponentTeam) : (!opponentTeam && opponentSearch.length < 2))}
+                >
+                  {loading ? 'Generating Report...' : scoutMode === 'h2h' ? 'Compare Teams' : 'Generate Scout Report'}
+                </button>
+              </div>
+
+              {loading && (
+                <div className="mt-6 text-center">
+                  <div className="animate-pulse text-xl text-c9-blue">Analyzing match data...</div>
+                </div>
+              )}
+
+              {error && (
+                <div className="mt-6 p-4 bg-red-500/20 border border-red-500 rounded-lg text-center">
+                  <p className="text-red-500">{error}</p>
+                </div>
+              )}
+            </div>
           </div>
-        ) : (
+        ) : comparisonReport ? (
+          /* H2H Comparison Report Display */
+          <div className="space-y-6">
+            {/* Header with both teams */}
+            <div className={`p-6 rounded-lg ${coachMode ? 'bg-gray-100' : 'bg-gray-800'}`}>
+              <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+                <div className="text-center md:text-left">
+                  <h2 className="text-2xl font-bold text-green-500">{comparisonReport.your_team.team_name}</h2>
+                  <p className={`text-sm ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>
+                    {comparisonReport.your_team.matches_analyzed} maps | {comparisonReport.your_team.summary.recent_form}
+                  </p>
+                </div>
+                <div className="text-3xl font-bold text-c9-blue">VS</div>
+                <div className="text-center md:text-right">
+                  <h2 className="text-2xl font-bold text-red-500">{comparisonReport.opponent.team_name}</h2>
+                  <p className={`text-sm ${coachMode ? 'text-gray-600' : 'text-gray-400'}`}>
+                    {comparisonReport.opponent.matches_analyzed} maps | {comparisonReport.opponent.summary.recent_form}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Recommendation Summary */}
+            <section className={`p-6 border-l-8 border-c9-blue ${coachMode ? 'bg-gray-100' : 'bg-gray-800'}`}>
+              <h2 className="text-sm uppercase tracking-widest text-c9-blue mb-2">Game Plan</h2>
+              <p className="text-xl font-bold">{comparisonReport.recommendation}</p>
+            </section>
+
+            {/* Map Advantages */}
+            <MapAdvantagesSection
+              advantages={comparisonReport.map_advantages}
+              yourTeamName={comparisonReport.your_team.team_name}
+              opponentName={comparisonReport.opponent.team_name}
+              coachMode={coachMode}
+            />
+
+            {/* Opponent Analysis Section */}
+            <div className={`p-4 rounded-lg ${coachMode ? 'bg-blue-50 border-2 border-blue-200' : 'bg-blue-900/20'}`}>
+              <h2 className="text-xl font-bold mb-4 text-c9-blue">Opponent Analysis: {comparisonReport.opponent.team_name}</h2>
+            </div>
+
+            {/* Veto Engine for opponent */}
+            <VetoEngine recommendations={comparisonReport.opponent.veto_recommendations} coachMode={coachMode} />
+
+            {/* Tactical Insights for opponent */}
+            <TacticalInsights insights={comparisonReport.opponent.tactical_insights} coachMode={coachMode} />
+
+            {/* Opponent Map Pool */}
+            <MapPoolMatrix matrix={comparisonReport.opponent.map_pool_matrix} coachMode={coachMode} />
+
+            {/* Opponent Players */}
+            <PlayerStatsSection players={comparisonReport.opponent.player_stats} coachMode={coachMode} />
+
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row justify-center gap-4 pt-4">
+              <button
+                onClick={handleReset}
+                className="px-6 py-3 border-2 border-c9-blue rounded hover:bg-c9-blue hover:text-white transition"
+              >
+                New Comparison
+              </button>
+              {coachMode && (
+                <button
+                  onClick={() => window.print()}
+                  className="px-6 py-3 bg-c9-blue rounded font-bold hover:bg-opacity-80 transition text-white"
+                >
+                  Print Report
+                </button>
+              )}
+            </div>
+          </div>
+        ) : report ? (
+          /* Single Team Report Display */
           <div className="space-y-6">
             {/* Header */}
             <div className={`p-4 rounded-lg ${coachMode ? 'bg-gray-100' : 'bg-gray-800'}`}>
@@ -509,14 +809,14 @@ function App() {
               {coachMode && (
                 <button
                   onClick={() => window.print()}
-                  className="px-6 py-3 bg-c9-blue rounded font-bold hover:bg-opacity-80 transition"
+                  className="px-6 py-3 bg-c9-blue rounded font-bold hover:bg-opacity-80 transition text-white"
                 >
                   Print Report
                 </button>
               )}
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Footer */}
         <footer className={`mt-12 pt-6 border-t text-center text-sm ${coachMode ? 'border-gray-200 text-gray-500' : 'border-gray-700 text-gray-500'}`}>
