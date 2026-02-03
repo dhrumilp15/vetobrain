@@ -26,6 +26,17 @@ class AnalysisService:
     # All VALORANT maps in the current pool
     ALL_MAPS = ["Abyss", "Ascent", "Bind", "Breeze", "Haven", "Icebox", "Lotus", "Pearl", "Split", "Sunset"]
 
+    def get_team_map_stats(self, matches: List[Match]) -> Dict:
+        """
+        Extract map statistics from matches for use in veto calculations.
+
+        Returns a dict with 'map_stats' key containing a list of MapStats objects.
+        """
+        if not matches:
+            return {}
+        map_stats = self._analyze_map_performance(matches)
+        return {'map_stats': map_stats}
+
     def generate_scout_report(
         self,
         team_id: str,
@@ -45,11 +56,17 @@ class AnalysisService:
         # Analyze map performance
         map_stats = self._analyze_map_performance(matches)
 
-        # Identify primary threat
-        primary_threat, threat_reason = self._identify_primary_threat(player_aggregates)
-
-        # Generate player stat summaries
-        player_stats = self._generate_player_stats(player_aggregates)
+        # Check if we have actual player data - if not, use demo player stats
+        if not player_aggregates:
+            logger.warning(f"No player data found for team {team_name}, using demo player stats")
+            player_stats = self._get_demo_player_stats()
+            primary_threat = "Unknown (no player data)"
+            threat_reason = "insufficient data"
+        else:
+            # Identify primary threat
+            primary_threat, threat_reason = self._identify_primary_threat(player_aggregates)
+            # Generate player stat summaries
+            player_stats = self._generate_player_stats(player_aggregates)
 
         # Determine recommended map bans (opponent's best maps)
         recommended_bans = self._get_recommended_bans(map_stats)
@@ -104,56 +121,86 @@ class AnalysisService:
         our_team_stats: Optional[Dict] = None
     ) -> List[VetoRecommendation]:
         """
-        Generate map veto recommendations using weighted scoring.
+        Generate map veto recommendations using a blended model that aligns
+        color semantics with Tactical Insights thresholds.
 
-        Formula: Map Score = (Our Win% * 0.5) - (Their Win% * 0.5) + H2H Bonus
+        Core score (kept): Map Score = (Our Win% * 0.5) - (Their Win% * 0.5)
+        Color guardrails (new):
+          - Strong map (their WR >= 70% with >=2 games) → at least BAN
+          - Weak map (their WR <= 40% with >=2 games) → at least PICK
+          - NEUTRAL ("yellow/decider") only when their WR is in the same
+            middle band used by insights (40–70%) AND the differential is small.
         """
-        # Build their win rates by map
-        their_rates = {ms.map_name: ms.win_rate for ms in their_map_stats}
-        their_games = {ms.map_name: ms.games_played for ms in their_map_stats}
+        # Build their win rates by map (as fractions 0..1) and sample sizes
+        # Use lowercase keys for case-insensitive lookup
+        their_rates = {ms.map_name.lower(): ms.win_rate for ms in their_map_stats}
+        their_games = {ms.map_name.lower(): ms.games_played for ms in their_map_stats}
 
-        # If we have our team stats, use them; otherwise assume 50% baseline
-        our_rates = {}
+        # Our rates: use provided team stats if available, otherwise demo baselines
+        # Use lowercase keys for case-insensitive lookup
+        our_rates: Dict[str, float] = {}
         if our_team_stats and 'map_stats' in our_team_stats:
             for ms in our_team_stats['map_stats']:
-                our_rates[ms.map_name] = ms.win_rate
+                our_rates[ms.map_name.lower()] = ms.win_rate
         else:
-            # Demo mode: generate plausible "our" rates
+            # Demo mode: plausible "our" rates (fractions 0..1)
             our_rates = {
-                "Haven": 0.72, "Split": 0.45, "Bind": 0.58, "Ascent": 0.65,
-                "Icebox": 0.52, "Breeze": 0.48, "Lotus": 0.55, "Pearl": 0.60,
-                "Sunset": 0.50, "Abyss": 0.53
+                "haven": 0.72, "split": 0.45, "bind": 0.58, "ascent": 0.65,
+                "icebox": 0.52, "breeze": 0.48, "lotus": 0.55, "pearl": 0.60,
+                "sunset": 0.50, "abyss": 0.53
             }
 
-        recommendations = []
+        recommendations: List[VetoRecommendation] = []
         for map_name in self.ALL_MAPS:
-            our_wr = our_rates.get(map_name, 0.5)
-            their_wr = their_rates.get(map_name, 0.5)
-            their_gp = their_games.get(map_name, 0)
+            our_wr = our_rates.get(map_name.lower(), 0.5)
+            their_wr = their_rates.get(map_name.lower(), 0.5)
+            their_gp = their_games.get(map_name.lower(), 0)
 
-            # Calculate score: positive = good for us, negative = bad for us
+            # Differential score: positive = good for us, negative = bad for us
             score = (our_wr * 0.5) - (their_wr * 0.5)
 
-            # Add confidence penalty for maps they haven't played much
+            # Confidence penalty for small samples on their side
             if their_gp < 3:
-                score *= 0.8  # Reduce confidence
+                score *= 0.8
 
-            # Determine recommendation category
-            if score >= 0.15:
-                rec = "MUST_PICK"
-                reason = f"Strong advantage (+{score*100:.0f}%)"
-            elif score >= 0.05:
-                rec = "PICK"
-                reason = f"Slight advantage"
-            elif score <= -0.15:
-                rec = "MUST_BAN"
-                reason = f"They dominate this map ({their_wr*100:.0f}% WR)"
-            elif score <= -0.05:
-                rec = "BAN"
-                reason = f"They have an edge here"
+            # Align "yellow" with Tactical Insights middle band
+            strong_map = (their_wr >= 0.70 and their_gp >= 2)
+            weak_map = (their_wr <= 0.40 and their_gp >= 2)
+
+            # Decide category using guardrails first, then differential
+            if strong_map:
+                # Never show yellow for opponent-strong maps
+                if score <= -0.15:
+                    rec = "MUST_BAN"
+                    reason = f"They dominate this map ({their_wr*100:.0f}% WR)"
+                else:
+                    rec = "BAN"
+                    reason = f"Opponent-strong map ({their_wr*100:.0f}% WR)"
+            elif weak_map:
+                # Never show yellow for clear opponent-weak maps
+                if score >= 0.15:
+                    rec = "MUST_PICK"
+                    reason = "Clear advantage"
+                else:
+                    rec = "PICK"
+                    reason = "They struggle here"
             else:
-                rec = "NEUTRAL"
-                reason = "Even matchup - decider potential"
+                # Middle band (40–70%): allow decider based on small differential
+                if score >= 0.15:
+                    rec = "MUST_PICK"
+                    reason = f"Strong advantage (+{score*100:.0f}%)"
+                elif score >= 0.05:
+                    rec = "PICK"
+                    reason = "Slight advantage"
+                elif score <= -0.15:
+                    rec = "MUST_BAN"
+                    reason = f"They have a significant edge ({their_wr*100:.0f}% WR)"
+                elif score <= -0.05:
+                    rec = "BAN"
+                    reason = "They have an edge here"
+                else:
+                    rec = "NEUTRAL"
+                    reason = "Even matchup - decider potential"
 
             recommendations.append(VetoRecommendation(
                 map_name=map_name,
@@ -310,12 +357,12 @@ class AnalysisService:
         """
         matrix = []
 
-        # Create entries for all maps in the pool
-        stats_by_map = {ms.map_name: ms for ms in map_stats}
+        # Create entries for all maps in the pool (case-insensitive lookup)
+        stats_by_map = {ms.map_name.lower(): ms for ms in map_stats}
 
         for map_name in self.ALL_MAPS:
-            if map_name in stats_by_map:
-                ms = stats_by_map[map_name]
+            if map_name.lower() in stats_by_map:
+                ms = stats_by_map[map_name.lower()]
                 # Calculate attack/defense approximation
                 # In real data, you'd have this split. For demo, estimate from round data
                 total_rounds = ms.avg_rounds_won + ms.avg_rounds_lost
@@ -352,11 +399,9 @@ class AnalysisService:
         matrix.sort(key=lambda x: x.win_rate, reverse=True)
         return matrix
 
-    def _generate_demo_report(self, team_id: str, team_name: str) -> ScoutReport:
-        """Generate a demo report with realistic mock data for presentation."""
-
-        # Demo player stats
-        player_stats = [
+    def _get_demo_player_stats(self) -> List[PlayerStats]:
+        """Return demo player stats for use when real player data is unavailable."""
+        return [
             PlayerStats(name="aspas", top_agents=["Jett", "Raze", "Reyna"], impact="High", avg_acs=278.5, avg_kd=1.42, first_blood_rate=0.58, games_played=12),
             PlayerStats(name="Less", top_agents=["Sova", "Fade", "KAY/O"], impact="High", avg_acs=241.2, avg_kd=1.21, first_blood_rate=0.45, games_played=12),
             PlayerStats(name="cauanzin", top_agents=["Omen", "Astra", "Viper"], impact="Medium", avg_acs=198.7, avg_kd=1.05, first_blood_rate=0.38, games_played=12),
@@ -364,68 +409,37 @@ class AnalysisService:
             PlayerStats(name="raafa", top_agents=["Breach", "Skye", "Gekko"], impact="Medium", avg_acs=172.1, avg_kd=0.95, first_blood_rate=0.28, games_played=10),
         ]
 
-        # Demo map stats
+    def _generate_demo_report(self, team_id: str, team_name: str) -> ScoutReport:
+        """Generate a demo report with realistic mock data for presentation.
+        Demo now reuses the same generators used in real reports so that
+        Veto Guide, Tactical Insights, and Map Pool always agree.
+        """
+
+        # Demo player stats
+        player_stats = self._get_demo_player_stats()
+
+        # Demo opponent map stats (their historical performance)
         map_stats = [
             MapStats(map_name="Haven", games_played=5, wins=4, losses=1, avg_rounds_won=13.2, avg_rounds_lost=8.4),
             MapStats(map_name="Split", games_played=4, wins=3, losses=1, avg_rounds_won=13.0, avg_rounds_lost=9.5),
             MapStats(map_name="Ascent", games_played=4, wins=3, losses=1, avg_rounds_won=13.5, avg_rounds_lost=10.0),
             MapStats(map_name="Bind", games_played=3, wins=1, losses=2, avg_rounds_won=10.3, avg_rounds_lost=13.0),
-            MapStats(map_name="Lotus", games_played=2, wins=1, losses=1, avg_rounds_won=12.0, avg_rounds_lost=11.5),
+            # Make Lotus obviously strong to surface the BAN insight in demo
+            MapStats(map_name="Lotus", games_played=3, wins=3, losses=0, avg_rounds_won=13.8, avg_rounds_lost=9.7),
         ]
 
-        # Generate new features with mock data
-        veto_recommendations = [
-            VetoRecommendation(map_name="Haven", score=0.22, recommendation="MUST_PICK", our_win_rate=0.72, their_win_rate=0.80, reason="Our strongest map"),
-            VetoRecommendation(map_name="Ascent", score=0.10, recommendation="PICK", our_win_rate=0.65, their_win_rate=0.75, reason="Slight advantage"),
-            VetoRecommendation(map_name="Lotus", score=0.02, recommendation="NEUTRAL", our_win_rate=0.55, their_win_rate=0.50, reason="Decider potential"),
-            VetoRecommendation(map_name="Bind", score=-0.08, recommendation="BAN", our_win_rate=0.48, their_win_rate=0.33, reason="They struggle here but risky"),
-            VetoRecommendation(map_name="Split", score=-0.18, recommendation="MUST_BAN", our_win_rate=0.45, their_win_rate=0.75, reason="They dominate this map"),
-        ]
-
-        tactical_insights = [
-            TacticalInsight(
-                category="OPENING",
-                title="Pistol Specialists",
-                description=f"They win 72% of pistol rounds. Play passive angles on rounds 1 and 13. Don't ego peek - trade safely.",
-                severity="WARNING",
-                icon="!"
-            ),
-            TacticalInsight(
-                category="KEY_PLAYER",
-                title="Neutralize aspas",
-                description="aspas averages 278 ACS on Jett. Dedicate utility to shut him down early. If he's quiet, the team struggles.",
-                severity="WARNING",
-                icon="*"
-            ),
-            TacticalInsight(
-                category="MAP_POOL",
-                title="Exploit Bind",
-                description="Only 33% win rate on Bind. Force this map in veto if possible - they clearly have issues with the teleporters.",
-                severity="TIP",
-                icon=">"
-            ),
-            TacticalInsight(
-                category="COMPOSITION",
-                title="Duelist Heavy",
-                description="They run Jett + Raze on attack-sided maps. Expect aggressive dry peeks. Stack utility for retakes, don't over-rotate.",
-                severity="INFO",
-                icon="!"
-            ),
-        ]
-
-        map_pool_matrix = [
-            MapPoolEntry(map_name="Haven", games_played=5, win_rate=0.80, attack_win_rate=0.75, defense_win_rate=0.85, avg_round_diff=4.8),
-            MapPoolEntry(map_name="Split", games_played=4, win_rate=0.75, attack_win_rate=0.70, defense_win_rate=0.80, avg_round_diff=3.5),
-            MapPoolEntry(map_name="Ascent", games_played=4, win_rate=0.75, attack_win_rate=0.72, defense_win_rate=0.78, avg_round_diff=3.5),
-            MapPoolEntry(map_name="Lotus", games_played=2, win_rate=0.50, attack_win_rate=0.48, defense_win_rate=0.52, avg_round_diff=0.5),
-            MapPoolEntry(map_name="Bind", games_played=3, win_rate=0.33, attack_win_rate=0.30, defense_win_rate=0.36, avg_round_diff=-2.7),
-            MapPoolEntry(map_name="Icebox", games_played=0, win_rate=0.0, attack_win_rate=0.0, defense_win_rate=0.0, avg_round_diff=0.0),
-            MapPoolEntry(map_name="Breeze", games_played=0, win_rate=0.0, attack_win_rate=0.0, defense_win_rate=0.0, avg_round_diff=0.0),
-        ]
+        # Reuse the actual generators so all sections are consistent
+        veto_recommendations = self._generate_veto_recommendations(map_stats)
+        tactical_insights = self._generate_tactical_insights(
+            self._aggregate_player_stats([]),  # empty player data for demo templates
+            map_stats,
+            []
+        )
+        map_pool_matrix = self._generate_map_pool_matrix(map_stats)
 
         summary = ReportSummary(
             primary_threat="aspas (Jett)",
-            key_takeaway=f"{team_name} plays an aggressive duelist-focused style centered around aspas. Ban Split and force them onto Bind where they struggle.",
+            key_takeaway=f"{team_name} plays an aggressive duelist-focused style centered around aspas. Ban their best map and aim for their weak ones.",
             team_playstyle="Aggressive duelist-focused",
             recent_form="4W-1L in last 5"
         )
@@ -434,7 +448,7 @@ class AnalysisService:
             team_id=team_id,
             team_name=team_name,
             summary=summary,
-            recommended_bans=["Split", "Haven"],
+            recommended_bans=[m.map_name for m in map_stats if m.win_rate >= 0.7][:2],
             player_stats=player_stats,
             map_stats=map_stats,
             matches_analyzed=12,

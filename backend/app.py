@@ -167,6 +167,7 @@ def scout_team():
         team_id: GRID team ID (required if team_name not provided)
         team_name: Team name to search for (required if team_id not provided)
         match_count: Number of matches to analyze (default: 10, max: 20)
+        our_team_id: Your team's GRID ID (optional, for accurate veto recommendations)
 
     Returns:
         Comprehensive scouting report
@@ -179,6 +180,7 @@ def scout_team():
     team_id = data.get('team_id')
     team_name = data.get('team_name', '').strip()
     match_count = min(int(data.get('match_count', 10)), 20)
+    our_team_id = data.get('our_team_id')
 
     # Validate input
     if not team_id and not team_name:
@@ -218,9 +220,17 @@ def scout_team():
         if not matches:
             logger.warning(f"No matches found for team: {team_name}")
 
+        # Fetch "our team" stats if provided for accurate veto recommendations
+        our_team_stats = None
+        if our_team_id:
+            logger.info(f"Fetching our team stats for team ID: {our_team_id}")
+            our_matches = grid_service.get_matches_with_stats(our_team_id, match_count)
+            if our_matches:
+                our_team_stats = analysis_service.get_team_map_stats(our_matches)
+
         # Generate the scouting report
         logger.info(f"Generating report from {len(matches)} matches")
-        report = analysis_service.generate_scout_report(team_id, team_name, matches)
+        report = analysis_service.generate_scout_report(team_id, team_name, matches, our_team_stats)
 
         return jsonify(report.to_dict())
 
@@ -276,12 +286,16 @@ def compare_teams():
         your_matches = grid_service.get_matches_with_stats(your_team_id, match_count)
         opponent_matches = grid_service.get_matches_with_stats(opponent_team_id, match_count)
 
-        # Generate reports for both
+        # Get your team's map stats for veto calculations
+        your_team_stats = analysis_service.get_team_map_stats(your_matches)
+        opponent_team_stats = analysis_service.get_team_map_stats(opponent_matches)
+
+        # Generate reports for both (pass your stats to opponent report for accurate veto)
         your_report = analysis_service.generate_scout_report(
-            your_team_id, your_team.name, your_matches
+            your_team_id, your_team.name, your_matches, opponent_team_stats
         )
         opponent_report = analysis_service.generate_scout_report(
-            opponent_team_id, opponent_team.name, opponent_matches
+            opponent_team_id, opponent_team.name, opponent_matches, your_team_stats
         )
 
         # Find map advantages
