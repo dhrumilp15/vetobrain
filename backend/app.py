@@ -2,7 +2,7 @@ import os
 import logging
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 
 from services.grid_service import GridService
 from services.analysis_service import AnalysisService
@@ -14,7 +14,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-load_dotenv()
+# Load .env from project root (searches up directory tree)
+load_dotenv(find_dotenv())
 
 app = Flask(__name__)
 CORS(app)

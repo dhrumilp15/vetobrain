@@ -204,8 +204,8 @@ class GridService:
         """
         variables = {
             "filter": {
-                "teamIds": [team_id],
-                "types": ["MATCH"]
+                "teamIds": {"in": [team_id]},
+                "type": "ESPORTS"
             },
             "first": limit
         }
